@@ -1,6 +1,8 @@
 # クリームソーダうみうし — Fizzy Meadow
 
-**Latest correction:** This build restores the renderer and shadow behaviour from before the last experimental performance revision. In Water World, the turtle begins beside (not underneath) the player spawn. If the player reaches the mint goal while riding, the character hops off the shell, walks a short distance onto clear seabed, and only then performs the zoom-in celebration dance.
+**Latest update — clickable clear screens and Mint Magnet:** The level-clear card now explicitly accepts pointer input while visible, and its continue button gets inline pointer-event restoration and focus when revealed (including the next-world arrival card). One hidden magnet pickup exists in each stage. Collecting it attracts distant mints for the remainder of that stage; the effect and pickup reset at the next stage/replay. The magnet indicator appears in the local-time HUD only while active.
+
+**Latest correction:** This build restores the renderer and shadow behaviour from before the last experimental performance revision. Distance clipping now turns off far non-target scenery in spatial chunks while keeping the background floor and every mint visible. The Water World turtle is positioned about 11.2 units from the player start, in the actual chase-camera sightline rather than beside/behind the camera. If the player reaches the mint goal while riding, the character hops off the shell, walks a short distance onto clear seabed, and only then performs the zoom-in celebration dance. Level-clear cards wait for a deliberate tap before advancing.
 
 A mobile-friendly, free-roaming 3D plush adventure built for static hosting on GitHub Pages. Explore the meadow, swim through Water World, hop between stacked bridges, and hike the fictional Blue Ridge Mountain. Friends have conversations, harmless creatures wander through each biome, and there are extra mints so you do not need to find every collectible.
 
@@ -70,7 +72,7 @@ The files are optional and are intentionally not included in this ZIP. Each stag
 
 This package intentionally restores the renderer and shadow-update behaviour from the revision before the latest experimental performance pass. The close-up plush character, previous shadow refresh cadence, and world content are retained; the environment batching and GPU-driven far-bubble shader from that experimental pass are not used here. The existing modest bubble LOD, distance culling, and adaptive pixel ratio from the prior baseline remain.
 
-The current baseline keeps 4,000 bubbles in Water World. On touch devices, the nearest 300 render as detailed spheres and the rest as point sprites; bubble motion and contact are updated on the CPU at a throttled cadence. The shadow map refreshes regularly again rather than staying stale until the camera/player moves enough to trigger it.
+The current baseline keeps 4,000 bubbles in Water World. On touch devices, the nearest 300 render as detailed spheres and the rest as point sprites; bubble motion and contact are updated on the CPU at a throttled cadence. The shadow map refreshes regularly again rather than staying stale until the camera/player moves enough to trigger it. Non-target vegetation, rocks, scenery, friends, and creatures use distance clipping (typically 26–50 world units on phones, with longer ranges for platforms and route surfaces). Static instanced ground dressing is split into spatial chunks so far chunks can be hidden independently. The background floor and mint collectibles are never distance-culled. Stage-clear summary cards require a tap before progressing, giving the player time to read their result.
 
 
 ## Build locally

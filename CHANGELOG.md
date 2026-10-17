@@ -1,5 +1,11 @@
 # Changelog
 
+## October 17, 2026 — Make stage-clear continuation clickable and add stage magnets
+- Fixed the clear-screen CTA hit target: the visible finale overlay accepts pointer input, and the continue button explicitly restores pointer events, a valid enabled state, and focus when revealed. The world-arrival tap card uses the same safe setup, preserving the separate tap to begin movement in the next stage.
+- The CTA handler prevents accidental default/propagation behavior and handles both the clear action and the following world-entry confirmation.
+- Added one collectible magnet power-up to each of the four stages. It is kept off the minimap for discovery, activates a stage-long mint-attraction radius on collection, displays an active magnet indicator, and resets on stage changes/replays.
+- Added build guards for the clear-screen pointer-events state, actual continue-button wiring, four stage pickup placements, all four stage-specific mint-attraction update call sites, reset behavior, and a Meadow pickup placement away from spawn.
+
 ## October 17, 2026 — Restore previous renderer/shadows and fix turtle-goal finale
 - Reverted the most recent experimental environment batching, GPU-driven far-bubble animation, and movement-triggered shadow refresh changes. This build is based on the previous revision's renderer and shadow behaviour, before the latest performance pass that made shadows look wrong.
 - Moved the Water World turtle beside the player spawn at (7.1, 0, 12), rather than beneath the player's starting position. The player must approach it and hop onto the shell.
@@ -194,3 +200,10 @@
 - Added distance LOD for kelp/coral and meadow decoration, a soft water fog fade, less frequent background foliage animation, and adaptive phone render scale that backs off during sustained low frame rates and recovers when frame time improves.
 - Kept the meadow trampoline-arc bonus mints available without raising the 50-mint clear requirement; completion copy now celebrates the actual amount collected rather than claiming every mint was found.
 - Increased turtle taxi speed to 24 world units per second while preserving its locked target and contact-based mint collection.
+
+
+## October 17, 2026 — Stronger distance clipping and visible turtle spawn
+- Added spatial distance clipping to static instanced meadow/shore/underwater dressing. Distant chunked grass, moss, flowers, stones, and pebbles turn off by chunk; collectible mints and the background floor are deliberately never distance-culled.
+- Tightened scenery visibility so decorative ground props fade out around 30–34 units on touch devices (roughly 44–50 on desktop), friends around 30/42, and ambient creatures around 26/38. Water kelp/coral and non-target bubbles use their own near-detail ranges; bridge decks and mountain route surfaces retain longer safe ranges so upcoming traversal remains readable.
+- Added explicit build guards for distance culling, excluding target mints and the background floor from the cull lists, plus tap-to-continue level-clear results.
+- Moved the Water World turtle to (-5.5, 0, 2.3), approximately 11.2 units from the player start and aligned with the chase camera's actual forward sightline. The build now checks both physical separation and projected camera-forward distance, so the turtle must be visible ahead without overlapping or auto-boarding the player.

@@ -58,7 +58,14 @@ button { font: inherit; -webkit-tap-highlight-color: transparent; }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
 /* A brief full-screen card covers the environment swap so the finale feels like a real transition. */
 .finale-overlay { position: absolute; z-index: 15; inset: 0; display: grid; place-items: center; padding: 24px; visibility: hidden; opacity: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 42%, rgba(18,89,112,.92), rgba(2,18,38,.98)); backdrop-filter: blur(9px); transition: opacity .78s ease, visibility .78s ease; }
-.finale-overlay.is-visible { visibility: visible; opacity: 1; }
+.finale-overlay.is-visible { visibility: visible; opacity: 1; pointer-events: auto; }
+/* The result card is intentionally non-interactive during the dance. Once the action button is
+   revealed, this explicit state restores hit-testing on the overlay and its descendants. */
+.finale-overlay.is-visible.has-action { pointer-events: auto; }
+.finale-overlay.is-visible.has-action .finale-card, .finale-overlay.is-visible.has-action .stage-continue-button { pointer-events: auto; }
+/* Keep the continue CTA an actual hit target on touch browsers even while the overlay animates. */
+.finale-overlay .stage-continue-button:not(.is-hidden) { position: relative; z-index: 2; pointer-events: auto !important; touch-action: manipulation; cursor: pointer; }
+.finale-overlay .stage-continue-button:not(.is-hidden):active { filter: brightness(.97); }
 .finale-card { width: min(520px, calc(100vw - 38px)); padding: 28px 30px 25px; text-align: center; border: 1px solid rgba(209,251,255,.36); border-radius: 28px; background: linear-gradient(145deg, rgba(13,67,92,.74), rgba(3,33,59,.64)); box-shadow: 0 25px 90px rgba(0,7,25,.35), inset 0 1px 0 rgba(255,255,255,.18); color: #efffff; transform: translateY(12px) scale(.98); transition: transform .9s cubic-bezier(.2,.75,.2,1); }
 .finale-overlay.is-visible .finale-card { transform: translateY(0) scale(1); }
 .finale-kicker { color: #9cf4ed; font-size: 10px; font-weight: 1000; letter-spacing: 3px; }
@@ -142,6 +149,8 @@ h1 em { color: #e25250; font-style: normal; }
 .stage-continue-button.is-hidden { display: none; }
 
 .finale-overlay.waiting-for-stage-tap { pointer-events: auto; }
+.magnet-indicator { display: block; margin-top: 2px; padding: 3px 5px; border: 1px solid rgba(169,247,255,.55); border-radius: 5px; color: #d4ffff; background: rgba(24,108,126,.60); font-family: Arial, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif; font-size: 7px; font-weight: 950; letter-spacing: .2px; text-shadow: 0 1px 3px rgba(0,0,0,.75); white-space: nowrap; pointer-events: none; }
+.magnet-indicator.is-hidden { display: none; }
 
 /* Fullscreen works on browsers with the Fullscreen API; fallback keeps the game app immersive. */
 #app:fullscreen, #app:-webkit-full-screen, #app.pseudo-fullscreen {
@@ -176,7 +185,7 @@ h1 em { color: #e25250; font-style: normal; }
   .mobile-action { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: clamp(140px, 38vh, 166px); height: clamp(140px, 38vh, 166px); padding: 5px; border: 1px solid rgba(255,255,255,.95); border-radius: 50%; background: linear-gradient(145deg, rgba(255,250,248,.96), rgba(255,224,220,.88)); color: #a84855; box-shadow: 0 6px 17px rgba(130,79,78,.18), inset 0 1px 0 white; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
   .mobile-action span { font-size: clamp(32px, 8vh, 42px); line-height: 1; font-weight: 1000; }.mobile-action small { font-size: 8px; font-weight: 1000; letter-spacing: .35px; }.mobile-action.is-pressed { transform: translateY(2px) scale(.97); background: #ffd7d2; }
   .hud { inset: max(4px, env(safe-area-inset-top)) 7px auto; gap: 5px; }.brand { padding: 3px 6px 3px 4px; gap: 5px; }.brand-icon { width: 25px; height: 25px; font-size: 16px; }.brand-copy .eyebrow { font-size: 5px; }.brand-copy strong { font-size: 8px; }.hud-right { gap: 3px; padding: 3px; }.hud-stat { min-width: 28px; gap: 2px; }.hud-stat b { font-size: 8px; }.hud-stat small { font-size: 5px; }.score-stat { display: none; }.icon-button { width: 24px; height: 24px; font-size: 13px; }
-  .world-hint { display: none; }.broadcast-clock { top: 43px; left: 7px; min-width: 84px; padding: 4px 6px; gap: 1px; }.broadcast-kicker { font-size: 5px; } #broadcast-time { font-size: 17px; } .broadcast-date { font-size: 7px; } #moon-readout { font-size: 6px; } .weather-chip { font-size: 6px; padding: 1px 3px; }
+  .world-hint { display: none; }.broadcast-clock { top: 43px; left: 7px; min-width: 84px; padding: 4px 6px; gap: 1px; }.broadcast-kicker { font-size: 5px; } #broadcast-time { font-size: 17px; } .broadcast-date { font-size: 7px; } #moon-readout { font-size: 6px; } .weather-chip { font-size: 6px; padding: 1px 3px; } .magnet-indicator { font-size: 5px; padding: 2px 3px; }
   .world-map-panel { top: 43px; right: 7px; width: 86px; padding: 4px; gap: 3px; border-radius: 9px; }.map-heading { font-size: 5px; }.world-map-panel #minimap { width: 72px; height: 72px; border-radius: 6px; }.map-legend { font-size: 5px; gap: 2px; }.map-legend i { width: 4px; height: 4px; }
   .talk-prompt { bottom: max(94px, calc(env(safe-area-inset-bottom) + 88px)); padding: 6px 8px; gap: 6px; }.talk-sparkle { width: 27px; height: 27px; }.dialogue-card { bottom: max(92px, calc(env(safe-area-inset-bottom) + 85px)); max-height: 48dvh; overflow-y: auto; padding: 10px 13px; }.dialogue-header h2 { font-size: 15px; } #dialogue-text { margin: 6px 0 8px; min-height: 20px; font-size: 11px; }.dialogue-avatar { width: 30px; height: 30px; }.dialogue-next { padding: 8px 10px; }
   .welcome-card { max-height: calc(100dvh - 8px); padding: 12px 18px 10px; border-radius: 18px; }.mini-kicker { font-size: 6px; } h1 { margin-top: 5px; font-size: 26px; }.welcome-subtitle { margin: 4px 0 7px; font-size: 8px; }.hero-preview { grid-template-columns: 70px 1fr; gap: 6px; padding: 5px; }.reference-frame { height: 72px; }.note-line { font-size: 7px; gap: 5px; }.hero-notes { gap: 4px; }.promise { font-size: 7px; line-height: 1.25; }.welcome-goal { margin: 6px 0; font-size: 8px; line-height: 1.25; }.primary-button { min-height: 34px; padding: 7px 12px; font-size: 10px; }.welcome-controls { margin-top: 6px; gap: 4px 8px; font-size: 7px; }.welcome-secondary-actions { margin-top: 2px; gap: 4px; }.welcome-fullscreen-button, .music-note-button { padding: 4px 7px; margin-top: 2px; font-size: 7px; }

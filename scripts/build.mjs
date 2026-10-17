@@ -12,6 +12,8 @@ await cp(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), { recur
 
 // Progression collectibles are release invariants: each world must have a 20% mint cushion.
 const gameSource = await readFile(path.join(root, 'src', 'main.js'), 'utf8');
+const styleSource = await readFile(path.join(root, 'src', 'style.css'), 'utf8');
+const htmlSource = await readFile(path.join(root, 'index.html'), 'utf8');
 function countLiteralSpots(arrayName) {
   const match = gameSource.match(new RegExp(`const ${arrayName} = \\[([\\s\\S]*?)\\];`));
   if (!match) throw new Error(`Could not find the ${arrayName} collectible list.`);
@@ -126,6 +128,42 @@ const gameplayGuards = [
 for (const guard of gameplayGuards) {
   if (!guard.test(gameSource)) throw new Error(`Missing gameplay feature regression guard: ${guard}`);
 }
+// The level-clear CTA must be genuinely clickable: the overlay blocks pointer events during the
+// dance, then explicitly enables them when the result action is shown. Check both CSS and JS.
+if (!/\.finale-overlay\.is-visible\s*\{[^}]*pointer-events:\s*auto;/.test(styleSource) ||
+    !/\.finale-overlay\.is-visible\.has-action\s*\{\s*pointer-events:\s*auto;/.test(styleSource) ||
+    !/classList\.add\('is-visible', 'has-action'\)/.test(gameSource) ||
+    !/continueButton\.style\.pointerEvents = 'auto'/.test(gameSource) ||
+    !/arrivalContinueButton\.style\.pointerEvents = 'auto'/.test(gameSource) ||
+    !/stage-continue-button'\)\.addEventListener\('click'/.test(gameSource) ||
+    !/state\.clearAwaitingTap = true/.test(gameSource)) {
+  throw new Error('Level-clear continue button must receive pointer events once visible and be wired to the stage transition handler.');
+}
+if (!htmlSource.includes('id="magnet-indicator"') ||
+    !/const stageMagnetPickups = \[/.test(gameSource) ||
+    !/function resetStageMagnet\(stage = worldMode\)/.test(gameSource) ||
+    !/function tryCollectStageMagnet\(now\)/.test(gameSource) ||
+    !/function attractMintTowardPlayer\(mint, dt\)/.test(gameSource) ||
+    !/state\.magnetActive = true/.test(gameSource) ||
+    !/function updateStageMagnetVisuals\(now\)/.test(gameSource) ||
+    !/attractMintTowardPlayer\(pearl, dt\)/.test(gameSource) ||
+    !/attractMintTowardPlayer\(mint, dt\)/.test(gameSource) ||
+    !/resetStageMagnet\('water'\)/.test(gameSource) ||
+    !/resetStageMagnet\('bridge'\)/.test(gameSource) ||
+    !/resetStageMagnet\('mountain'\)/.test(gameSource) ||
+    !/resetStageMagnet\('meadow'\)/.test(gameSource)) {
+  throw new Error('All four stages must have a collectible stage-long magnet, working mint attraction, an active-state indicator, and reset-on-stage-entry behavior.');
+}
+const magnetStageList = gameSource.match(/const stageMagnetPickups = \[([\s\S]*?)\];/);
+const magnetStages = magnetStageList ? [...magnetStageList[1].matchAll(/createStageMagnet\('([a-z]+)'/g)].map(m => m[1]).sort() : [];
+const magnetPullCalls = [...gameSource.matchAll(/^\s+attractMintTowardPlayer\((?:pearl|mint), dt\);/gm)].length;
+if (magnetStages.join(',') !== 'bridge,meadow,mountain,water' || magnetPullCalls !== 4) {
+  throw new Error(`Exactly one hidden magnet and a mint-attraction update are required in each stage; found stages ${magnetStages.join(', ') || 'none'} and ${magnetPullCalls} attraction calls.`);
+}
+const meadowMagnet = gameSource.match(/createStageMagnet\('meadow',scene,([-\d.]+),0,([-\d.]+)\)/);
+if (!meadowMagnet || Math.hypot(Number(meadowMagnet[1]),Number(meadowMagnet[2])-12) < 18) {
+  throw new Error('Meadow magnet must be tucked away from the starting area, not collected immediately at spawn.');
+}
 if (!/const UNDERWATER_BUBBLE_COUNT = 4000;/.test(gameSource) ||
     !/const UNDERWATER_DETAILED_BUBBLES = touchGpuProfile \? 300 : 760;/.test(gameSource) ||
     !/farBubblePoints/.test(gameSource) ||
@@ -144,11 +182,11 @@ if (!/const renderPixelRatioCap = touchGpuProfile \? 1\.28 : 1\.6;/.test(gameSou
     !/now - lastBubbleLodSort >= BUBBLE_LOD_SORT_INTERVAL/.test(gameSource) ||
     !/averageFrameMs > 24/.test(gameSource) ||
     !/underwaterDetailGroups/.test(gameSource) ||
-    !/const detailRange = touchGpuProfile \? 80 : 106;/.test(gameSource) ||
+    !/const detailRange = touchGpuProfile \? 36 : 52;/.test(gameSource) ||
     !/function updateMeadowDetailLOD\(now\)/.test(gameSource) ||
-    !/const detailRange = touchGpuProfile \? 102 : 138;/.test(gameSource) ||
+    !/const detailRange = touchGpuProfile \? 34 : 50;/.test(gameSource) ||
     !/const minimumAdaptivePixelRatio = Math\.min\(0\.90, activePixelRatio\)/.test(gameSource)) {
-  throw new Error('Mobile GPU savings must retain distance-based bubble LOD, a capped touch DPR, and lower-cadence 1024px soft shadows.');
+  throw new Error('Mobile GPU savings must retain bubble LOD, world-space static-geometry chunks, and safe distance clipping.');
 }
 if (!/const mountainJunctions = mountainTrailNodes\.map\(node=>\(\{node,half:7\.0,mesh:null\}\)\)/.test(gameSource) ||
     !/function findMountainSurfaceAt\(x,z\)/.test(gameSource) ||
@@ -233,6 +271,36 @@ for (const [ok, description] of replayGuards) if (!ok) throw new Error(`Missing 
 const replayAvailable = [((Math.ceil(50*1.2) + 44) * 2), Math.ceil(50*1.2)*2, Math.ceil(60*1.2)*2, Math.ceil(70*1.2)*2];
 const replayRequired = [50*2, 50*2, 60*2, 70*2];
 if (replayAvailable.join('/') !== '208/120/144/168' || replayRequired.join('/') !== '100/100/120/140') throw new Error('Second-run mint availability and required goals must both double again.');
+
+if (!/function splitInstancedMeshByDistance\(/.test(gameSource) ||
+    !/function updateSpatialChunkLOD\(/.test(gameSource) ||
+    !/meadowBlades = splitInstancedMeshByDistance/.test(gameSource) ||
+    !/stoneInstances = splitInstancedMeshByDistance/.test(gameSource) ||
+    !/pebbleInstances = splitInstancedMeshByDistance/.test(gameSource) ||
+    !/waterRocks = splitInstancedMeshByDistance/.test(gameSource) ||
+    !/function updateFriendDistanceLOD\(/.test(gameSource) ||
+    !/const range = touchGpuProfile \? 30 : 42/.test(gameSource) ||
+    !/const updateRange = touchGpuProfile \? 26 : 38/.test(gameSource) ||
+    !/registerStageObjectCull\(group, 'bridge', 52, 70\)/.test(gameSource) ||
+    !/registerStageObjectCull\(ramp, 'mountain', 54, 72\)/.test(gameSource) ||
+    !/registerStageObjectCull\(ridge, 'mountain', 60, 78\)/.test(gameSource) ||
+    !/registerStageObjectCull\(rock, 'mountain', 36, 50\)/.test(gameSource) ||
+    !/registerStageObjectCull\(trunk, 'bridge', 36, 52\)/.test(gameSource)) {
+  throw new Error('Distant non-target scenery must be spatially clipped while floors and mint collectibles remain available.');
+}
+if (!gameSource.includes('scene.add(safetyGround);') ||
+    /registerStageObjectCull\((?:safetyGround|meadowBase|meadow|pearls|waterMints|bridgeMints|mountainMints)\b/i.test(gameSource) ||
+    /(?:pearls|waterMints|bridgeMints|mountainMints)\s*=\s*splitInstancedMeshByDistance/.test(gameSource)) {
+  throw new Error('The background floor and all target mint collections must remain available even when distant scenery is clipped.');
+}
+if (!/clearAwaitingTap: false, pendingClearTarget: null/.test(gameSource) ||
+    !/state\.clearAwaitingTap = true; state\.pendingClearTarget = f\.targetWorld/.test(gameSource) ||
+    !/if \(state\.clearAwaitingTap\)/.test(gameSource) ||
+    !/Choose a world to replay/.test(gameSource) ||
+    !/Continue to Water World/.test(gameSource)) {
+  throw new Error('A clear-result screen must wait for an explicit tap before moving on.');
+}
+
 const indexSource = await readFile(path.join(root, 'index.html'), 'utf8');
 if (!indexSource.includes('208 mints available · collect 100 · counter resets') || !indexSource.includes('120 mints available · collect 100 · counter resets') || !indexSource.includes('144 mints available · collect 120 · counter resets') || !indexSource.includes('168 mints available · collect 140 · counter resets')) throw new Error('Replay selector must explain the doubled mint counts and goals.');
 if (!/new Float32Array\(560 \* 3\)/.test(gameSource) || /(?<!new )Float32Array\(560 \* 3\)/.test(gameSource)) {
@@ -252,7 +320,7 @@ if (!/width: clamp\(150px, 40vh, 174px\); height: clamp\(150px, 40vh, 174px\)/.t
 }
 if (!/desiredX=dx\/dist\*24\.0/.test(gameSource) ||
     !/if\(seaTurtle\.target\?\.collected\) seaTurtle\.target=null/.test(gameSource) ||
-    !/seaTurtle\.group\.position\.set\(7\.1,0,12\)/.test(gameSource) ||
+    !/seaTurtle\.group\.position\.set\(-5.5,0,2.3\)/.test(gameSource) ||
     !/const exitTurtle = worldMode === 'water' && targetWorld === 'bridge' && state\.ridingTurtle/.test(gameSource) ||
     !/state\.finale\.exitDuration = exitTurtle \? 1\.35 : 0/.test(gameSource) ||
     !/const exitDuration = f\.exitTurtle \? f\.exitDuration : 0/.test(gameSource) ||
@@ -269,7 +337,10 @@ const turtleStartMatch = gameSource.match(/const group = new THREE\.Group\(\); g
 if (!turtleStartMatch) throw new Error('Water World turtle must have an explicit spawn point.');
 const turtleStartX = Number(turtleStartMatch[1]), turtleStartZ = Number(turtleStartMatch[2]);
 const turtlePlayerSpawnDistance = Math.hypot(turtleStartX, turtleStartZ - 12);
-if (turtlePlayerSpawnDistance < 6.0) throw new Error(`Turtle spawn overlaps the player spawn (${turtlePlayerSpawnDistance.toFixed(2)} units apart).`);
+if (turtlePlayerSpawnDistance < 10.5) throw new Error(`Turtle spawn is too close to the player spawn (${turtlePlayerSpawnDistance.toFixed(2)} units apart).`);
+const cameraForwardDistance = ((-7.8 * turtleStartX) + (-13.8 * (turtleStartZ - 12))) / Math.hypot(7.8, 13.8);
+if (cameraForwardDistance < 10.5) throw new Error(`Turtle must be far enough away and ahead in the actual chase-camera view (${cameraForwardDistance.toFixed(2)} projected units).`);
+console.log(`Water World turtle spawn verified: ${turtlePlayerSpawnDistance.toFixed(2)} units from the player, ${cameraForwardDistance.toFixed(2)} units along the camera's forward view.`);
 if (!/const exitDirections = \[/.test(gameSource) || !/exitTarget = \{[\s\S]*?turtleX \+ exitDirection\[0\] \* 7\.1/.test(gameSource) || !/walkY = THREE\.MathUtils\.lerp\(f\.exitStart\.y, 0, hopT\) \+ Math\.sin\(hopT \* Math\.PI\) \* 1\.75/.test(gameSource)) {
   throw new Error('Mint-goal dance while riding the turtle must first hop off, walk clear of the shell, and then start the celebration.');
 }
