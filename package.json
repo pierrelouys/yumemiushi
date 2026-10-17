@@ -1,0 +1,11 @@
+{
+  "name": "cream-soda-umisea-adventure",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "check": "node --check src/main.js && node --check scripts/build.mjs && node --check scripts/serve.mjs"
+  }
+}

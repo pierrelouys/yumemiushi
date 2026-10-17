@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#d5f8f1" />
+  <meta name="description" content="Meet the plush friends of the Fizzy Meadow as クリームソーダうみうし, a free-roaming 3D adventure." />
+  <title>クリームソーダうみうし — Fizzy Meadow</title>
+  <link rel="stylesheet" href="./src/style.css" />
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <main id="app">
+    <canvas id="game-canvas" aria-label="Explore the 3D Fizzy Meadow as a mint plush sea slug. Move freely in all directions and talk to other plush friends." tabindex="0"></canvas>
+
+    <header class="hud">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">🍒</div>
+        <div class="brand-copy"><span class="eyebrow">FIZZY MEADOW</span><strong>クリームソーダうみうし</strong></div>
+      </div>
+      <div class="hud-right">
+        <div class="hud-stat pearls-stat"><span class="stat-icon">✧</span><span><b id="pearl-count">0</b><small id="pearl-limit">/ 25</small></span><small id="pearls-stat-label" class="collectible-label">FIZZ</small></div>
+        <div class="hud-stat friend-stat"><span class="stat-icon">♡</span><span><b id="friend-count">0/8</b><small>friends</small></span></div>
+        <div class="score-stat"><span class="stat-label">SPARKLES</span><b id="score-count">00000</b></div>
+        <button id="sound-toggle" class="icon-button" type="button" aria-label="Mute music" title="Music on">♫</button>
+        <button id="pause-toggle" class="icon-button" type="button" aria-label="Pause game" title="Pause">Ⅱ</button>
+      </div>
+    </header>
+
+    <div class="world-hint"><span class="hint-dot"></span><span>Wander anywhere · meet the meadow friends</span></div>
+    <div class="broadcast-clock" aria-label="Local time, intended weather, and current lunar phase">
+      <span class="broadcast-kicker">LOCAL TIME</span>
+      <b id="broadcast-time">--:--</b>
+      <small id="weather-chip" class="weather-chip" aria-live="polite">⛅ Scattered clouds</small>
+      <small id="moon-readout">☾ Checking the moon…</small>
+    </div>
+    <aside class="world-map-panel" aria-label="Minimap showing uncollected mint pearls and friends you have not met">
+      <div class="map-heading"><b>MEADOW MAP</b></div>
+      <canvas id="minimap" width="176" height="176" aria-label="Map of the meadow. Mint dots mark uncollected pearls, violet dots mark friends not yet met, and the cherry marker shows your location."></canvas>
+      <div class="map-legend"><span><i class="legend-mint"></i> Mint</span><span><i class="legend-friend"></i> Friends</span></div>
+    </aside>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <section id="finale-overlay" class="finale-overlay" aria-live="polite" aria-label="Fizz collection celebration and world transition">
+      <div class="finale-card">
+        <div id="finale-kicker" class="finale-kicker">EVERY LAST DROP</div>
+        <h2 id="finale-title">You found every fizz!</h2>
+        <p id="finale-subtitle">A little celebration… then, something is bubbling beneath the meadow.</p>
+        <div class="finale-sparkles" aria-hidden="true">✦　✧　·　✧　✦</div>
+      </div>
+    </section>
+
+    <section id="welcome-screen" class="overlay">
+      <div class="welcome-card">
+        <div class="mini-kicker"><span>✦</span> A SOFT LITTLE WORLD <span>✦</span></div>
+        <h1>クリームソーダ<br /><em>うみうし</em></h1>
+        <p class="welcome-subtitle">A minty plush friend, a meadow full of pals, and nowhere you need to hurry.</p>
+        <div class="hero-preview">
+          <div class="reference-frame"><img src="./assets/reference-character.png" alt="Reference photograph of the mint sea-slug plush with green stitched star eyes, ivory feelers, red cherry and scalloped underside" /></div>
+          <div class="hero-notes">
+            <div class="note-line"><span class="note-swatch mint"></span><span>Mint knitted plush</span></div>
+            <div class="note-line"><span class="note-swatch cream"></span><span>Ivory feelers & ruffle</span></div>
+            <div class="note-line"><span class="note-swatch cherry"></span><span>Red felt cherry & stem</span></div>
+            <div class="promise">Meet eight plush friends, trade little stories, and gather fizzy pearls at your own pace.</div>
+          </div>
+        </div>
+        <div class="welcome-goal"><span class="goal-star">✦</span><span>Wander freely, hop over silly jelly bumps, collect pearls, and say hello to nearby friends.</span></div>
+        <button id="start-button" class="primary-button" type="button">Enter the meadow <span>→</span></button>
+        <p id="startup-status" class="startup-status" role="status" aria-live="polite"></p>
+        <div class="welcome-controls"><span>WASD / arrows · move</span><span>SPACE · jump (hold to hop)</span><span>SPACE near a friend · talk / continue</span></div>
+        <button id="welcome-music-toggle" class="music-note-button" type="button">♫ Music is on · tap to toggle</button>
+      </div>
+    </section>
+
+    <section id="pause-screen" class="overlay is-hidden">
+      <div class="small-card">
+        <div class="mini-kicker">A LITTLE BREATHER</div><h2>Rest your feelers.</h2>
+        <p>Your meadow friends will be right here when you are ready.</p>
+        <button id="resume-button" class="primary-button" type="button">Back to the meadow <span>→</span></button>
+        <button id="restart-button" class="text-button" type="button">Return to the starting spot</button>
+      </div>
+    </section>
+
+    <section id="dialogue-card" class="dialogue-card is-hidden" aria-live="polite">
+      <div class="dialogue-header"><div class="dialogue-avatar">♡</div><div><div id="dialogue-kicker" class="dialogue-kicker">A MEADOW HELLO</div><h2 id="dialogue-name">Momo</h2></div><button id="dialogue-close" class="dialogue-x" type="button" aria-label="Close conversation">×</button></div>
+      <p id="dialogue-text"></p>
+      <button id="dialogue-next" class="dialogue-next" type="button">Keep chatting →</button>
+    </section>
+
+    <div id="talk-prompt" class="talk-prompt is-hidden"><span class="talk-sparkle">♡</span><span><b id="talk-prompt-name">Momo</b><small>nearby · press Space / JUMP</small></span></div>
+
+    <div id="touch-controls" class="touch-controls" aria-label="Movement and hop controls">
+      <div class="move-control-wrap"><div class="control-caption">MOVE</div><div id="move-stick" class="move-stick" role="application" aria-label="Drag joystick to move left, right, forward or backward"><div class="stick-ring"></div><div id="stick-knob" class="stick-knob"></div></div></div>
+      <div class="action-control-wrap"><div class="control-caption">JUMP / TALK</div><button id="mobile-action" class="mobile-action" type="button" aria-label="Hold to keep hopping; press near a friend to talk or continue dialogue"><span>↑</span><small>JUMP / TALK</small></button></div>
+    </div>
+  </main>
+  <script>
+    // Bind the welcome button before the heavy 3D module finishes building the scene.
+    // A tap during boot is queued and replayed once the game announces readiness.
+    (() => {
+      const button = document.getElementById('start-button');
+      const status = document.getElementById('startup-status');
+      const labelNode = button && button.firstChild;
+      const arrow = button && button.querySelector('span');
+      const originalLabel = labelNode ? labelNode.textContent : 'Enter the meadow ';
+      let pendingStart = false;
+      let bootFailed = false;
+      const setLoading = () => {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        if (labelNode) labelNode.textContent = 'Waking up the meadow… ';
+        if (arrow) arrow.textContent = '✦';
+        status.textContent = 'Getting the meadow ready…';
+      };
+      const showBootError = () => {
+        if (window.__FIZZY_MEADOW_READY__) return;
+        bootFailed = true;
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (labelNode) labelNode.textContent = 'Reload and try again ';
+        if (arrow) arrow.textContent = '↻';
+        status.textContent = 'The meadow could not finish loading. Check your connection and tap to retry.';
+      };
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        if (bootFailed) { window.location.reload(); return; }
+        const start = window.__FIZZY_MEADOW_START__;
+        if (typeof start === 'function') {
+          pendingStart = false;
+          window.__FIZZY_MEADOW_START_REQUESTED__ = false;
+          start();
+          return;
+        }
+        pendingStart = true;
+        window.__FIZZY_MEADOW_START_REQUESTED__ = true;
+        setLoading();
+      });
+      window.addEventListener('fizzy-meadow-ready', () => {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (labelNode) labelNode.textContent = originalLabel;
+        if (arrow) arrow.textContent = '→';
+        status.textContent = '';
+        if (pendingStart) {
+          pendingStart = false;
+          window.__FIZZY_MEADOW_START_REQUESTED__ = false;
+          window.__FIZZY_MEADOW_START__();
+        }
+      });
+      window.addEventListener('error', event => {
+        if (!window.__FIZZY_MEADOW_READY__ && (event instanceof ErrorEvent || event.target?.tagName === 'SCRIPT')) showBootError();
+      }, true);
+      window.addEventListener('unhandledrejection', () => showBootError());
+      window.setTimeout(() => {
+        if (!window.__FIZZY_MEADOW_READY__ && !bootFailed) showBootError();
+      }, 25000);
+    })();
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
