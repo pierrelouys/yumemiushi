@@ -172,7 +172,7 @@ if (!magnetPlacementBlock ||
     !magnetPlacementBlock[1].includes("createStageMagnet('water',waterWorld, 99,0,-99)") ||
     !magnetPlacementBlock[1].includes("createStageMagnet('bridge',bridgeWorld, 82,0,-84)") ||
     !magnetPlacementBlock[1].includes("createStageMagnet('mountain',mountainWorld,-72,0.16,88)") ||
-    !/const MAGNET_RANGE_SCALE = 1 \/ 3;/.test(gameSource) ||
+    !/const MAGNET_RANGE_SCALE = 0\.6;/.test(gameSource) ||
     !/const MAGNET_LAND_RANGE = 5\.2 \* MAGNET_RANGE_SCALE;/.test(gameSource) ||
     !/const MAGNET_WATER_RANGE = 5\.8 \* MAGNET_RANGE_SCALE;/.test(gameSource) ||
     !/const MAGNET_VERTICAL_RANGE = 2\.8;/.test(gameSource) ||
@@ -185,7 +185,7 @@ if (!magnetPlacementBlock ||
     !/opacity:0\.17,\s*depthWrite:false/.test(gameSource) ||
     !/group\.scale\.setScalar\(1\.0\)/.test(gameSource) ||
     !/emissiveIntensity:0\.36/.test(gameSource)) {
-  throw new Error('Magnets must retain the one-third horizontal reach and full-size/bright visuals while using a functional 3D pull.');
+  throw new Error('Magnets must retain a balanced 60% horizontal reach and full-size/bright visuals while using a functional 3D pull.');
 }
 // Exercise the exact magnet-physics helper used by runtime: an offset mint moves each step,
 // directly-above mints still move vertically, and mint outside the horizontal reach is untouched.
@@ -194,23 +194,31 @@ const magnetTargetTest = { x:0, y:1, z:0 };
 let movingMintTest = { x:1.45, y:2.3, z:0.2 };
 const initialMagnetDistance = Math.hypot(movingMintTest.x, movingMintTest.y - magnetTargetTest.y, movingMintTest.z);
 for (let step = 0; step < 18; step++) {
-  calculateMagnetPullStep(movingMintTest, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
+  calculateMagnetPullStep(movingMintTest, magnetTargetTest, 1/60, 5.2*0.6, 2.8, testMagnetOut);
   if (!testMagnetOut.inRange) throw new Error('Magnet physics test: nearby mint incorrectly fell outside the field.');
   if (!testMagnetOut.moved) { if (testMagnetOut.distance <= 0.03) break; throw new Error('Magnet physics test: nearby mint failed to move.'); }
   movingMintTest = { x:testMagnetOut.x, y:testMagnetOut.y, z:testMagnetOut.z };
 }
 const finalMagnetDistance = Math.hypot(movingMintTest.x, movingMintTest.y - magnetTargetTest.y, movingMintTest.z);
 if (!(finalMagnetDistance < initialMagnetDistance * 0.30)) throw new Error(`Magnet physics test: mint failed to approach player (distance ${initialMagnetDistance.toFixed(2)} -> ${finalMagnetDistance.toFixed(2)}).`);
-calculateMagnetPullStep({x:0.01,y:2.2,z:0.01}, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
+calculateMagnetPullStep({x:0.01,y:2.2,z:0.01}, magnetTargetTest, 1/60, 5.2*0.6, 2.8, testMagnetOut);
 if (!testMagnetOut.inRange || !testMagnetOut.moved || !(testMagnetOut.y < 2.2)) throw new Error('Magnet physics test: vertically aligned mint does not move toward the player.');
-calculateMagnetPullStep({x:5.2/3+0.2,y:1,z:0}, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
-if (testMagnetOut.inRange || testMagnetOut.moved) throw new Error('Magnet physics test: horizontal reach exceeds the requested one-third range.');
-const effectiveMagnetRanges = { land: 5.2 / 3, water: 5.8 / 3, vertical: 2.8 };
+calculateMagnetPullStep({x:5.2*0.6+0.2,y:1,z:0}, magnetTargetTest, 1/60, 5.2*0.6, 2.8, testMagnetOut);
+if (testMagnetOut.inRange || testMagnetOut.moved) throw new Error('Magnet physics test: horizontal reach exceeds the tuned range.');
+calculateMagnetPullStep({x:2.8,y:1,z:0}, magnetTargetTest, 1/60, 5.2*0.6, 2.8, testMagnetOut);
+if (!testMagnetOut.inRange || !testMagnetOut.moved) throw new Error('Magnet physics test: a mint within the newly improved reach is not pulled.');
+const effectiveMagnetRanges = { land: 5.2 * 0.6, water: 5.8 * 0.6, vertical: 2.8 };
 const magneticCollectionCallCount = [...gameSource.matchAll(/const pickupRadius = mintPickupRadius\(/g)].length;
 if (!(effectiveMagnetRanges.land > 1.05 && effectiveMagnetRanges.water > 1.05 && effectiveMagnetRanges.vertical > 1.05) || magneticCollectionCallCount !== 4) {
   throw new Error('All four worlds must perform magnetic attraction and world-space mint collision checks.');
 }
 console.log(`Magnet movement simulation passed: nearby 3D distance ${initialMagnetDistance.toFixed(2)} -> ${finalMagnetDistance.toFixed(2)}; horizontal range ${effectiveMagnetRanges.land.toFixed(2)} land / ${effectiveMagnetRanges.water.toFixed(2)} water; elevated mint pulls vertically.`);
+if (!/new THREE\.CircleGeometry\(1\.5, 36\)/.test(gameSource) ||
+    !/color: '#383838', transparent: true, opacity: 0\.22/.test(gameSource) ||
+    !/shadow\.material\.color\.set\('#383838'\); shadow\.material\.opacity = 0\.22;/.test(gameSource) ||
+    !/shadow\.material\.color\.set\('#383838'\); shadow\.material\.opacity=0\.22;/.test(gameSource)) {
+  throw new Error('The player ground shadow must stay compact and neutral rather than rendering as a bright green halo.');
+}
 if (!/renderer\.shadowMap\.autoUpdate = true;/.test(gameSource) || /shadowRefreshInterval|lastShadowRefresh/.test(gameSource) || !/renderer\.shadowMap\.type = THREE\.PCFSoftShadowMap;/.test(gameSource) || !/sun\.shadow\.camera\.updateProjectionMatrix\(\);/.test(gameSource) || !/scene\.add\(sun\.target\);/.test(gameSource) || !/function updateSunShadowAnchor\(\)/.test(gameSource) || !/sun\.target\.position\.set\(tx, ty, tz\)/.test(gameSource) || !/sun\.position\.set\(tx - 35, ty \+ 65, tz \+ 32\)/.test(gameSource) || !/sun\.shadow\.normalBias = 0\.025;/.test(gameSource) || !/updateSunShadowAnchor\(\);\n  musicTick\(\);/.test(gameSource)) {
   throw new Error('Shadows must use a valid, updated orthographic projection, player-following light target, and normal PCF soft-shadow updates.');
 }

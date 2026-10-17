@@ -17,6 +17,11 @@
 
 # Changelog
 
+## October 17, 2026 — Neutral player shadow and more useful Mint Magnet
+- Replaced the bright green ground-shadow tint with a compact, low-opacity neutral shadow; underwater, Bridge, and mountain shadow colors are also muted so the player no longer appears to have a green halo.
+- Increased horizontal magnetic reach from one-third to 60% of its prior ranges (3.12 land / 3.48 underwater). Kept the existing 3D pull, speed, pickup catch radius, and vertical allowance so the effect is easier to notice without becoming room-wide.
+- Updated build regression checks to verify the neutral shadow treatment, the revised range, visible movement from within the increased field, and that targets outside the tuned range remain unaffected.
+
 ## October 17, 2026 — Make stage-clear continuation clickable and add stage magnets
 - Fixed the clear-screen CTA hit target: the visible finale overlay accepts pointer input, and the continue button explicitly restores pointer events, a valid enabled state, and focus when revealed. The world-arrival tap card uses the same safe setup, preserving the separate tap to begin movement in the next stage.
 - The CTA handler prevents accidental default/propagation behavior and handles both the clear action and the following world-entry confirmation.

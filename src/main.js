@@ -20,9 +20,9 @@ const WATER_MINT_REQUIREMENT = 50;
 const BRIDGE_MINT_REQUIREMENT = 60;
 const MOUNTAIN_MINT_REQUIREMENT = 70;
 const MINT_CUSHION = 1.2;
-// Keep the deliberately short one-third magnet reach. When a mint is inside this reach,
-// it is pulled visibly toward the player before it can use the normal proximity pickup radius.
-const MAGNET_RANGE_SCALE = 1 / 3;
+// Keep magnet reach useful without making it room-wide: 60% of the original range gives
+// mints enough travel distance to visibly drift toward the player before normal pickup range.
+const MAGNET_RANGE_SCALE = 0.6;
 const MAGNET_LAND_RANGE = 5.2 * MAGNET_RANGE_SCALE;
 const MAGNET_WATER_RANGE = 5.8 * MAGNET_RANGE_SCALE;
 const MAGNET_VERTICAL_RANGE = 2.8;
@@ -1068,7 +1068,7 @@ const player = buildSlug({ player: true, cherry: true, furCount: 8500 });
 player.position.set(0, 0, 12);
 player.rotation.y = Math.PI; // Face looks ahead, away from the rear camera; its stitched stars are on the front.
 scene.add(player);
-const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.8, 36), new THREE.MeshBasicMaterial({ color: '#3f9b8d', transparent: true, opacity: 0.23, depthWrite: false }));
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.5, 36), new THREE.MeshBasicMaterial({ color: '#383838', transparent: true, opacity: 0.22, depthWrite: false }));
 shadow.rotation.x = -Math.PI / 2;
 shadow.position.y = 0.025;
 shadow.scale.set(1.22, 0.9, 1);
@@ -3212,7 +3212,7 @@ function enterWaterWorld(now) {
   scene.fog = new THREE.FogExp2('#0b5269', 0.0085);
   hemi.color.set('#a7e8f4'); hemi.groundColor.set('#0b3e51'); hemi.intensity = 1.05;
   fillLight.color.set('#64e5ef'); fillLight.intensity = 0.5;
-  shadow.material.color.set('#073b50'); shadow.material.opacity = 0.38;
+  shadow.material.color.set('#383838'); shadow.material.opacity = 0.22;
   for (const cluster of decorBubbles) {
     cluster.group.visible = true;
     cluster.group.traverse(obj => { if (obj.isMesh && obj.material?.color) obj.material.color.set('#aaf5ff'); });
@@ -3288,7 +3288,7 @@ function enterBridgeWorld(now) {
   $('#finale-subtitle').textContent = `Collect ${bridgeGoal.required} Bridge Mints to reach Blue Ridge Mountain. There are ${bridgeGoal.available} across the bridges, so you can leave some behind.`;
   scene.fog = new THREE.Fog('#8aab8c', 100, 265);
   hemi.color.set('#e4f4d7'); hemi.groundColor.set('#29442e'); fillLight.color.set('#c8e6ba');
-  shadow.material.color.set('#223c28'); shadow.material.opacity = 0.29;
+  shadow.material.color.set('#383838'); shadow.material.opacity = 0.22;
   setWeather('clear', now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout(); setStageMusic('bridge');
   sfx(392, 0.3, 'sine', 0.12); setTimeout(() => sfx(523, 0.32, 'triangle', 0.1), 145); setTimeout(() => sfx(659, 0.42, 'sine', 0.12), 300);
   if (replayMode) { setReplayCollectibleVisibility('bridge'); updateHUD(); }
@@ -3344,7 +3344,7 @@ function enterMountainWorld(now) {
   $('#finale-kicker').textContent='WELCOME TO BLUE RIDGE'; $('#finale-title').textContent='Blue Ridge Mountain';
   const mountainGoal = refreshStageGoal('mountain');
   $('#finale-subtitle').textContent=`Collect ${mountainGoal.required} Fresh Mints to reach the summit. There are ${mountainGoal.available} on the mountain, so you can leave some behind. Strong gusts can tumble you back toward the base.`;
-  scene.fog=new THREE.Fog('#9eb9c8',105,285); hemi.color.set('#dcebf1'); hemi.groundColor.set('#354d5e'); fillLight.color.set('#bed9e9'); shadow.material.color.set('#243949'); shadow.material.opacity=0.32;
+  scene.fog=new THREE.Fog('#9eb9c8',105,285); hemi.color.set('#dcebf1'); hemi.groundColor.set('#354d5e'); fillLight.color.set('#bed9e9'); shadow.material.color.set('#383838'); shadow.material.opacity=0.22;
   setWeather('wind',now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout(); setStageMusic('mountain');
   sfx(392,0.3,'sine',0.12); setTimeout(()=>sfx(523,0.32,'triangle',0.1),145); setTimeout(()=>sfx(659,0.42,'sine',0.12),300);
   if (replayMode) { setReplayCollectibleVisibility('mountain'); updateHUD(); }

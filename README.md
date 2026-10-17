@@ -1,6 +1,6 @@
 # クリームソーダうみうし — Fizzy Meadow
 
-**Latest update — restored each UI surface to its original opacity:** HUD/clock/minimap panels and the welcome/finale cards retain their original translucent glass backgrounds; the dialogue bubble remains at its original 96% cream opacity; and the talk prompt retains its original 92% fill. Only the mobile joystick and jump/talk controls use the deliberately increased transparency from the control-UI change. Magnet models remain full size with a bright aura and poles; off-route placements and the one-third attraction range are preserved.
+**Latest update — restored each UI surface to its original opacity:** HUD/clock/minimap panels and the welcome/finale cards retain their original translucent glass backgrounds; the dialogue bubble remains at its original 96% cream opacity; and the talk prompt retains its original 92% fill. Only the mobile joystick and jump/talk controls use the deliberately increased transparency from the control-UI change. Magnet models remain full size with a bright aura and poles; off-route placements are preserved, and horizontal attraction now reaches 60% of its original range.
 
 **Current progression and world presentation:** The welcome screen shows 50 Fizz required with 104 available in Meadow. Blue Ridge skyline ridges and snow caps remain outside the distance-culling system. Level-clear cards wait for a deliberate tap, and mint pickup toasts only appear after 20 seconds without another mint collection in the current stage.
 
@@ -106,7 +106,7 @@ The workflow in `.github/workflows/deploy.yml` checks JavaScript syntax, builds 
 Each UI panel retains the opacity it had before the accidental global-opaque override: the HUD, world hint, clock, minimap panel, weather chip, welcome/finale cards, talk prompt, and other glass surfaces keep their original translucency; the dialogue card remains at its original 96% cream fill. Only the mobile joystick and jump/talk control overlays have the explicitly requested extra transparency. On the welcome screen, the prominent **PLAY FULL SCREEN** option is available, and pressing **Enter the meadow** also tries the browser's Fullscreen API directly from the user's tap. Browsers that reject or do not offer native fullscreen fall back to the app's immersive viewport layout; mobile browsers may still keep browser chrome visible unless the game is launched from a supported Home Screen/PWA mode.
 
 ### Magnet visibility and Blue Ridge backdrop
-The current build keeps magnet attraction at one-third of its prior range: land 1.73 units, underwater 1.93 units, and vertical allowance 1.4 units. Pickups remain in peripheral off-route areas, but their original full size and bright aura are restored, and they remain visible throughout their active stage so they can be found. The Blue Ridge magnet is tucked at a ground-level side nook over 65 units away from the climbing trail.
+The current build uses a balanced 60% of the original horizontal magnet range: 3.12 units on land and 3.48 underwater, with a 2.8-unit vertical allowance. This gives attracted mints enough space to visibly move before pickup. Pickups remain in peripheral off-route areas, but their original full size and bright aura are restored, and they remain visible throughout their active stage so they can be found. The Blue Ridge magnet is tucked at a ground-level side nook over 65 units away from the climbing trail.
 
 All Blue Ridge mountain terrain objects bypass stage distance-culling. The skyline peaks and snow caps use fog-independent materials and are not frustum-culled, so the mountain silhouette stays visible while exploring the stage.
 
@@ -118,12 +118,12 @@ The friend dialogue card uses the original opaque cream panel for readability. I
 ### UI opacity restored per component (2026-10-17)
 - Removed the global opaque-panel override. Components that were translucent before that change are translucent again with their original values: HUD panels (76%), world hint (63%), clock (46%), minimap panel (78%), weather chip (13%), welcome/pause card (90%), finale card (74%/64%), talk prompt (92%), and the glass callout.
 - Kept the dialogue card at its original 96% cream fill and retained the transparent mobile movement/action controls. No opacity change was applied globally to unrelated text boxes.
-- Magnet models stay at full scale with bright poles/aura, remain visible throughout their active stage, and keep the requested one-third attraction range.
+- Magnet models stay at full scale with bright poles/aura, remain visible throughout their active stage, and keep the tuned 60% attraction range.
 
 
 ## Magnet attraction and shadow restoration (2026-10-17)
 
-- Fixed the no-visible-movement magnet bug: the previous active magnet radii (1.73 land / 1.93 water) were at or below the normal mint pickup spheres (1.65–2.15), so a mint in range was collected immediately instead of visibly moving toward the player. While a mint is in magnetic range, it now uses a smaller catch radius (1.05 units, adjusted for vertical separation), giving it time to be pulled before collection. The original smaller one-third influence range is retained.
+- Fixed the no-visible-movement magnet bug: the previous active magnet radii (1.73 land / 1.93 water) were at or below the normal mint pickup spheres (1.65–2.15), so a mint in range was collected immediately instead of visibly moving toward the player. While a mint is in magnetic range, it now uses a smaller catch radius (1.05 units, adjusted for vertical separation), giving it time to be pulled before collection. The influence range has since been increased to 60% of its original horizontal reach so attracted mints have room to visibly travel before pickup.
 - Magnetic mint motion now measures and updates positions in world space, then converts back to the mint's parent-local space, avoiding coordinate-space mismatches for mints in world groups.
 - Restored normal shadow updates by removing the throttled manual shadow refresh (72 ms mobile / 34 ms desktop) and re-enabling `renderer.shadowMap.autoUpdate`. The old throttle left moving-character and prop shadows stale between refreshes; the soft-shadow type and current map resolutions remain unchanged.
 
