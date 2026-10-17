@@ -10,10 +10,12 @@ let worldMode = 'meadow';
 const MEADOW_MINT_REQUIREMENT = 25;
 const WATER_MINT_REQUIREMENT = 25;
 const BRIDGE_MINT_REQUIREMENT = 30;
+const MOUNTAIN_MINT_REQUIREMENT = 35;
 const MINT_CUSHION = 1.2;
 const MEADOW_MINT_TOTAL = Math.ceil(MEADOW_MINT_REQUIREMENT * MINT_CUSHION);
 const WATER_MINT_TOTAL = Math.ceil(WATER_MINT_REQUIREMENT * MINT_CUSHION);
 const BRIDGE_MINT_TOTAL = Math.ceil(BRIDGE_MINT_REQUIREMENT * MINT_CUSHION);
+const MOUNTAIN_MINT_TOTAL = Math.ceil(MOUNTAIN_MINT_REQUIREMENT * MINT_CUSHION);
 scene.background = new THREE.Color('#d5f8f1');
 scene.fog = new THREE.Fog('#d5f8f1', 105, 245);
 
@@ -310,6 +312,13 @@ const bridgeDaylightKeys = daylightKeys.map((key, i) => ({
   ground: ['#09150f','#14251d','#3e6e51','#4b8358','#4f8652','#526e48','#303c2e','#101d16','#09150f'][i],
   hemi: ['#1b2a27','#5b716a','#e3d8d3','#e4f3e2','#e3f5dd','#e8e2cf','#c7adb0','#384d43','#1b2a27'][i],
 }));
+const mountainDaylightKeys = daylightKeys.map((key, i) => ({
+  ...key,
+  sky: ['#030917','#111d31','#b6cbd9','#7eb0d8','#78add9','#8aaec9','#d79d91','#101b31','#030917'][i],
+  fog: ['#0a1421','#203244','#d2d9db','#b2c9d9','#b4cddd','#c6d0d2','#c79b98','#19283a','#0a1421'][i],
+  ground: ['#182b31','#2b414b','#688b85','#547d82','#4f7680','#607c7c','#424c50','#24353d','#182b31'][i],
+  hemi: ['#1f2b3e','#73818e','#e6e7e3','#d6e5ee','#dcebf1','#ede0d8','#cdb3af','#394859','#1f2b3e'][i],
+}));
 const SYNODIC_MONTH_DAYS = 29.530588853;
 const KNOWN_NEW_MOON_UTC = Date.UTC(2000, 0, 6, 18, 14);
 function lunarInfo(now = new Date()) {
@@ -351,7 +360,7 @@ function applyLocalTime() {
   const moonIcon = lunarPhase < 0.04 || lunarPhase > 0.96 ? '●' : (lunarPhase < 0.5 ? '☽' : '☾');
   $('#moon-readout').textContent = `${moonIcon} ${lunar.name} · ${Math.round(moonIllumination * 100)}%`;
   if (weatherInitialized) updateWeatherReadout();
-  const keys = worldMode === 'water' ? waterDaylightKeys : (worldMode === 'bridge' ? bridgeDaylightKeys : daylightKeys);
+  const keys = worldMode === 'water' ? waterDaylightKeys : (worldMode === 'bridge' ? bridgeDaylightKeys : (worldMode === 'mountain' ? mountainDaylightKeys : daylightKeys));
   let left = keys[0], right = keys[keys.length - 1];
   for (let i = 0; i < keys.length - 1; i++) {
     if (hour >= keys[i].h && hour < keys[i + 1].h) { left = keys[i]; right = keys[i + 1]; break; }
@@ -374,17 +383,18 @@ function applyLocalTime() {
   const twilightWeight = Math.max(dawnWeight, duskWeight);
   let lowerAtmosphere;
   if (nightWeight > 0.55) {
-    lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#102b46' : (worldMode === 'bridge' ? '#17251f' : '#11182e'));
+    lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#102b46' : (worldMode === 'bridge' ? '#17251f' : (worldMode === 'mountain' ? '#111c2d' : '#11182e')));
   } else if (twilightWeight > 0.04) {
     const warmDawn = new THREE.Color('#f3bdc5');
     const warmDusk = new THREE.Color('#ef9a91');
     lowerAtmosphere = warmDawn.lerp(warmDusk, duskWeight / Math.max(0.001, dawnWeight + duskWeight));
     if (worldMode === 'water') lowerAtmosphere.lerp(new THREE.Color('#8acbd9'), 0.28);
     if (worldMode === 'bridge') lowerAtmosphere.lerp(new THREE.Color('#c8aa9b'), 0.22);
+    if (worldMode === 'mountain') lowerAtmosphere.lerp(new THREE.Color('#a2bed0'), 0.16);
   } else if (skyCloudiness > 0.70) {
     lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#9cbcc7' : '#bdcbd7');
   } else {
-    lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#b4f0f1' : (worldMode === 'bridge' ? '#f0e7d8' : '#f3f7ff'));
+    lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#b4f0f1' : (worldMode === 'bridge' ? '#f0e7d8' : (worldMode === 'mountain' ? '#d4e4ee' : '#f3f7ff')));
   }
   updateSkyGradient(scene.background.clone().multiplyScalar(nightWeight > 0.55 ? 0.74 : 0.86), scene.fog.color, lowerAtmosphere);
   updateSkyActors(performance.now());
@@ -1061,33 +1071,77 @@ for (let i = 0; i < 7; i++) {
   const ray = new THREE.Mesh(new THREE.PlaneGeometry(10 + waterRand() * 10, 43 + waterRand() * 13), rayMaterial);
   ray.position.set((waterRand() * 2 - 1) * 72, 17 + waterRand() * 5, (waterRand() * 2 - 1) * 72); ray.rotation.y = waterRand() * Math.PI; waterWorld.add(ray);
 }
-// A large ribbed scallop shell sits on the seabed as a solid landmark, not scenery to pass through.
-const seaShell = new THREE.Group();
-const shellOuter = new THREE.MeshStandardMaterial({ color: '#d78d91', roughness: 0.72, metalness: 0.02, side: THREE.DoubleSide });
-const shellInner = new THREE.MeshStandardMaterial({ color: '#f4c5c5', roughness: 0.48, metalness: 0.03, side: THREE.DoubleSide, emissive: '#6e363e', emissiveIntensity: 0.08 });
-const shellRim = new THREE.MeshStandardMaterial({ color: '#ffe1d0', roughness: 0.42, metalness: 0.04 });
-const shellShape = new THREE.Shape();
-shellShape.moveTo(0, 0.04);
-for (let i = 0; i <= 30; i++) { const a = Math.PI * i / 30; shellShape.lineTo(Math.cos(a) * 2.12, 0.08 + Math.sin(a) * 2.28); }
-shellShape.lineTo(0, 0.04);
-const shellBacking = new THREE.Mesh(new THREE.ExtrudeGeometry(shellShape, { depth: 0.38, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.075, bevelThickness: 0.075 }), shellOuter);
-shellBacking.position.z = -0.2; shellBacking.castShadow = true; shellBacking.receiveShadow = true; seaShell.add(shellBacking);
-const innerShape = new THREE.Shape(); innerShape.moveTo(0, 0.12);
-for (let i = 0; i <= 30; i++) { const a = Math.PI * i / 30; innerShape.lineTo(Math.cos(a) * 1.78, 0.13 + Math.sin(a) * 1.91); }
-innerShape.lineTo(0, 0.12);
-const shellInside = new THREE.Mesh(new THREE.ShapeGeometry(innerShape, 2), shellInner); shellInside.position.z = 0.235; seaShell.add(shellInside);
-for (let i = 1; i < 12; i++) {
-  const a = (i / 12) * Math.PI, end = new THREE.Vector3(Math.cos(a) * 1.92, 0.13 + Math.sin(a) * 2.04, 0.29);
-  const start = new THREE.Vector3(Math.cos(a) * 0.10, 0.12 + Math.sin(a) * 0.10, 0.30);
-  const mid = new THREE.Vector3(Math.cos(a) * 1.04, 0.16 + Math.sin(a) * 1.05, 0.32);
-  const ribCurve = new THREE.CatmullRomCurve3([start, mid, end]);
-  seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(ribCurve, 12, 0.045, 6, false), shellRim));
+// A broad, naturally fanned scallop shell reclining on the seabed (not an upright wheel).
+function makeScallopShellTexture() {
+  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const bg = ctx.createLinearGradient(0, 0, 0, 512);
+  bg.addColorStop(0, '#ffe6dd'); bg.addColorStop(0.38, '#f4bfc5'); bg.addColorStop(0.72, '#df969f'); bg.addColorStop(1, '#f8d9c9');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, 512, 512);
+  // Fine, irregular nacre lines radiate from the hinge like a real scallop shell.
+  for (let i = -8; i <= 8; i++) {
+    const endX = 256 + i * 27;
+    ctx.beginPath(); ctx.moveTo(256 + i * 2, 506);
+    ctx.bezierCurveTo(256 + i * 5, 390, 256 + i * 17, 150, endX, 25 + Math.abs(i) * 1.8);
+    ctx.strokeStyle = i % 2 ? 'rgba(255,244,224,0.35)' : 'rgba(165,91,111,0.13)';
+    ctx.lineWidth = i % 3 === 0 ? 3.0 : 1.5; ctx.stroke();
+  }
+  for (let i = 0; i < 800; i++) {
+    const x = Math.random() * 512, y = Math.random() * 512;
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.09)' : 'rgba(123,66,81,0.035)';
+    ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 1.6);
+  }
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = anisotropy;
+  // ShapeGeometry uses its local x/y as UVs, so map the -2.5..2.5 / 0..2 canvas footprint to 0..1.
+  texture.repeat.set(0.2, 0.5); texture.offset.set(0.5, 0); texture.needsUpdate = true;
+  const bump = texture.clone(); bump.colorSpace = THREE.NoColorSpace; bump.needsUpdate = true;
+  return { texture, bump };
 }
-const shellLipCurve = new THREE.CatmullRomCurve3(Array.from({ length: 31 }, (_, i) => { const a = Math.PI * i / 30; return new THREE.Vector3(Math.cos(a) * 2.12, 0.08 + Math.sin(a) * 2.28, 0.30); }));
-seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(shellLipCurve, 48, 0.095, 8, false), shellRim));
-seaShell.position.set(38, 0.02, -42); seaShell.rotation.y = -0.20; seaShell.scale.setScalar(1.12); seaShell.castShadow = true; seaShell.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); waterWorld.add(seaShell);
-const seaShellCollider = { x: seaShell.position.x, z: seaShell.position.z, radius: 2.35, height: 2.8 };
-
+const shellTextures = makeScallopShellTexture();
+const seaShell = new THREE.Group();
+const shellOuter = new THREE.MeshStandardMaterial({ color: '#fff1e9', roughness: 0.62, metalness: 0.015, side: THREE.DoubleSide, map: shellTextures.texture, bumpMap: shellTextures.bump, bumpScale: 0.025 });
+const shellInner = new THREE.MeshStandardMaterial({ color: '#fff0e3', roughness: 0.31, metalness: 0.02, side: THREE.DoubleSide, map: shellTextures.texture, bumpMap: shellTextures.bump, bumpScale: 0.012, emissive: '#643b45', emissiveIntensity: 0.025 });
+const shellRim = new THREE.MeshStandardMaterial({ color: '#ffe8d7', roughness: 0.38, metalness: 0.02 });
+function makeFanShellShape(scale = 1) {
+  const shape = new THREE.Shape(); shape.moveTo(0, 0.08);
+  // Broad scalloped fan edge with six soft lobes, tapering cleanly to a narrow hinge.
+  for (let i = 0; i <= 96; i++) {
+    const a = Math.PI * i / 96;
+    const scallop = 0.90 + 0.10 * Math.cos(a * 12);
+    shape.lineTo(Math.cos(a) * 2.3 * scallop * scale, 0.10 + Math.sin(a) * 1.85 * scallop * scale);
+  }
+  shape.lineTo(0, 0.08); return shape;
+}
+const shellBacking = new THREE.Mesh(new THREE.ExtrudeGeometry(makeFanShellShape(), { depth: 0.16, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.035, bevelThickness: 0.035 }), shellOuter);
+shellBacking.position.z = -0.10; shellBacking.castShadow = true; shellBacking.receiveShadow = true; seaShell.add(shellBacking);
+const shellInside = new THREE.Mesh(new THREE.ShapeGeometry(makeFanShellShape(0.84), 2), shellInner);
+shellInside.position.set(0, 0.025, 0.078); seaShell.add(shellInside);
+// Delicate fluting follows the shell's natural fan rather than forming a wheel's spokes.
+for (let i = 0; i < 9; i++) {
+  const a = (i + 0.5) / 9 * Math.PI;
+  const scallop = 0.90 + 0.10 * Math.cos(a * 12);
+  const endX = Math.cos(a) * 2.12 * scallop;
+  const endY = 0.10 + Math.sin(a) * 1.67 * scallop;
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-0.035 + i * 0.009, 0.13, 0.125),
+    new THREE.Vector3(Math.cos(a) * 0.52, 0.22 + Math.sin(a) * 0.40, 0.143),
+    new THREE.Vector3(endX * 0.70, 0.12 + (endY - 0.10) * 0.72, 0.13),
+    new THREE.Vector3(endX, endY, 0.105),
+  ]);
+  seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.014, 5, false), shellRim));
+}
+const shellLipCurve = new THREE.CatmullRomCurve3(Array.from({ length: 97 }, (_, i) => {
+  const a = Math.PI * i / 96, scallop = 0.90 + 0.10 * Math.cos(a * 12);
+  return new THREE.Vector3(Math.cos(a) * 2.3 * scallop, 0.10 + Math.sin(a) * 1.85 * scallop, 0.10);
+}));
+seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(shellLipCurve, 96, 0.042, 7, false), shellRim));
+// Small hinge nub only; there is deliberately no large round central disc.
+const shellHinge = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 9), shellRim);
+shellHinge.position.set(0, 0.12, 0.09); shellHinge.scale.set(0.34, 0.095, 0.09); seaShell.add(shellHinge);
+// It rests open on the sand, face tilted up to catch the underwater light.
+seaShell.position.set(38, 0.16, -40.85); seaShell.rotation.set(-1.24, -0.20, 0); seaShell.scale.set(1.02, 0.96, 0.82);
+seaShell.castShadow = true; seaShell.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); waterWorld.add(seaShell);
+const seaShellCollider = { x: seaShell.position.x, z: seaShell.position.z - 1.15, radius: 2.5, height: 1.65 };
 // A mottled stone bed and gently bending kelp make the ocean feel inhabited, not like a blue room.
 const waterRockMaterial = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.15, color: '#8ccbd0', roughness: 1 });
 const waterRockCount = 250;
@@ -1338,8 +1392,9 @@ const bridgeSegmentSpecs = [
   { x: 0, z: -22, y: 14.85, length: 23, width: 4.0, rotation: -0.18 },
   { x: -15, z: -11, y: 18.25, length: 23, width: 3.8, rotation: 0.88 },
   { x: -17, z: 7, y: 21.65, length: 21, width: 3.8, rotation: 0.88 },
-  { x: 0, z: 19, y: 25.05, length: 26, width: 4.2, rotation: 0.25 },
-  { x: 7, z: 12, y: 25.85, length: 25, width: 4.2, rotation: -0.12 },
+  { x: 0, z: 19, y: 25.05, length: 28, width: 5.0, rotation: 0.0 },
+  // Summit deck: a clear, short forward hop from Sora's deck. Deck edges are only 0.2 units apart.
+  { x: 1.7, z: 13.8, y: 25.85, length: 28, width: 5.0, rotation: 0.0 },
 ];
 bridgeSegmentSpecs.forEach(addBridgeSegment);
 function localBridgePoint(platform, lx, lz = 0) {
@@ -1417,6 +1472,126 @@ for (const [i, spec] of powerSpotSpecs.entries()) {
 }
 if (bridgePowerups.length !== bridgePlatforms.length + 1) throw new Error('Bridge World must have one respawning mint-hole power-up per bridge plus the entrance pickup.');
 
+// --- World 4: Blue Ridge Mountain — a winding climb, fresh mints, and strong ridge gusts --------
+const mountainWorld = new THREE.Group(); mountainWorld.visible = false; scene.add(mountainWorld);
+const mountainGroundMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.20, color: '#758d9b', roughness: 1 });
+const mountainGround = new THREE.Mesh(new THREE.PlaneGeometry(223.7, 223.7), mountainGroundMat);
+mountainGround.rotation.x = -Math.PI / 2; mountainGround.position.y = -0.08; mountainGround.receiveShadow = true; mountainWorld.add(mountainGround);
+const mountainRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.17, color: '#718da4', roughness: 1 });
+const mountainShadowRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.20, color: '#506e88', roughness: 1 });
+const mountainSnowMat = new THREE.MeshStandardMaterial({ color: '#edf3ec', roughness: 0.98, bumpMap: stoneBumpTexture, bumpScale: 0.04 });
+// Distinct layered blue ridges form the skyline, unrelated to any real-world mountain range.
+const ridgePeaks = [
+  [-86,-78,28,62],[-59,-93,33,74],[-27,-101,25,52],[10,-102,38,82],[49,-98,30,68],[82,-81,25,56],
+  [-96,-24,22,46],[96,-17,24,48],[-89,40,26,52],[87,42,22,43],
+];
+for (const [x,z,r,h] of ridgePeaks) {
+  const ridge = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 2), mountainRockMat);
+  ridge.position.set(x, h * 0.48 - 1.1, z); ridge.rotation.y = rand() * Math.PI; ridge.scale.set(1.22,1,0.76); ridge.castShadow = true; ridge.receiveShadow = true; mountainWorld.add(ridge);
+  if (h > 58) {
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.40, h * 0.23, 7, 1), mountainSnowMat);
+    cap.position.set(x * 0.99, h * 0.80, z); cap.rotation.y = ridge.rotation.y; cap.scale.set(1.16,1,0.77); mountainWorld.add(cap);
+  }
+}
+// Trail is a sequence of connected, broad inclined ledges on a switchback route. Each edge meets
+// the next, so hiking is possible without a perfect jump; the open sides mean a strong gust can
+// still knock the player down to the safe base below.
+const mountainTrailNodes = [
+  { x: 0, z: 76, y: 0.16 }, { x: -15, z: 55, y: 2.35 }, { x: 8, z: 34, y: 4.54 },
+  { x: -14, z: 13, y: 6.73 }, { x: 10, z: -8, y: 8.92 }, { x: -12, z: -29, y: 11.11 },
+  { x: 10, z: -50, y: 13.30 }, { x: -10, z: -70, y: 15.49 }, { x: 3, z: -88, y: 17.68 },
+];
+const mountainTrailSegments = [];
+function addMountainRamp(startNode, endNode, index) {
+  const dx = endNode.x - startNode.x, dz = endNode.z - startNode.z, dy = endNode.y - startNode.y;
+  const horizontal = Math.hypot(dx,dz), length = Math.hypot(horizontal,dy), width = 13.2;
+  const tangent = new THREE.Vector3(dx,dy,dz).normalize();
+  const side = new THREE.Vector3(-dz,0,dx).normalize();
+  const up = side.clone().cross(tangent).normalize();
+  const basis = new THREE.Matrix4().makeBasis(tangent, up, side);
+  const ramp = new THREE.Group(); ramp.quaternion.setFromRotationMatrix(basis);
+  ramp.position.set((startNode.x+endNode.x)/2, (startNode.y+endNode.y)/2, (startNode.z+endNode.z)/2).addScaledVector(up,-0.34);
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(length,0.68,width), index%2===0 ? mountainRockMat : mountainShadowRockMat);
+  bed.castShadow = true; bed.receiveShadow = true; ramp.add(bed); mountainWorld.add(ramp);
+  // Small layered stone seams make the trail look carved out of real rock.
+  for (let i=1;i<7;i++) {
+    const t=i/7;
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.045,0.018,width-0.35), new THREE.MeshBasicMaterial({color:'#526b7b',transparent:true,opacity:0.52}));
+    seam.position.set((t-0.5)*length,0.347,0); ramp.add(seam);
+  }
+  mountainTrailSegments.push({start:startNode,end:endNode,width,ramp});
+}
+for (let i=0;i<mountainTrailNodes.length-1;i++) addMountainRamp(mountainTrailNodes[i],mountainTrailNodes[i+1],i);
+function mountainPointOnSegment(segment,t,sideOffset=0) {
+  const a=segment.start,b=segment.end,dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;
+  const offX=(-dz/len)*sideOffset,offZ=(dx/len)*sideOffset;
+  return { x:a.x+dx*t+offX,z:a.z+dz*t+offZ,y:a.y+(b.y-a.y)*t };
+}
+function mountainSurfaceAt(segment,x,z) {
+  const a=segment.start,b=segment.end,dx=b.x-a.x,dz=b.z-a.z,len2=dx*dx+dz*dz;
+  const t=((x-a.x)*dx+(z-a.z)*dz)/(len2||1);
+  if(t<0 || t>1) return null;
+  const cross=Math.abs((x-a.x)*dz-(z-a.z)*dx)/(Math.sqrt(len2)||1);
+  if(cross>segment.width/2+0.65) return null;
+  return {y:a.y+(b.y-a.y)*t,t,cross};
+}
+function mountainSupportBelow(x,z,y) {
+  let support=0;
+  for(const segment of mountainTrailSegments) { const hit=mountainSurfaceAt(segment,x,z); if(hit && hit.y<=y+0.035 && hit.y>support) support=hit.y; }
+  return support;
+}
+function findMountainLanding(oldY,newY,x,z) {
+  if(worldMode!=='mountain' || state.vy>0) return null;
+  let landing=null;
+  for(const segment of mountainTrailSegments) {
+    const hit=mountainSurfaceAt(segment,x,z); if(!hit) continue;
+    if(oldY>=hit.y-0.04 && newY<=hit.y+0.02 && (!landing || hit.y>landing.y)) landing={y:hit.y,segment};
+  }
+  return landing;
+}
+// Rock outcrops flank the path but leave its middle open for walking and collecting.
+for (let i=0;i<mountainTrailSegments.length;i++) {
+  const seg=mountainTrailSegments[i];
+  for (const t of [0.30,0.72]) for (const side of [-1,1]) {
+    const pt=mountainPointOnSegment(seg,t,side*(seg.width/2+2.2+rand()*1.5));
+    const size=1.05+rand()*1.65;
+    const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(1,1),i%2?mountainRockMat:mountainShadowRockMat);
+    rock.position.set(pt.x,pt.y+size*0.52-0.1,pt.z); rock.scale.set(size*1.25,size*0.9,size); rock.rotation.set(rand()*0.3,rand()*Math.PI,rand()*0.28); rock.castShadow=true; rock.receiveShadow=true; mountainWorld.add(rock);
+  }
+}
+const mountainCritterWorld = new THREE.Group(); mountainWorld.add(mountainCritterWorld);
+const mountainMintMaterial = new THREE.MeshStandardMaterial({ color:'#c8ffd1', map:platformMintTexture, bumpMap:platformMintBump, bumpScale:0.065, roughness:0.48, emissive:'#3c8a65', emissiveIntensity:0.23 });
+const mountainMintRimMaterial = new THREE.MeshStandardMaterial({ color:'#efffe9', roughness:0.36, metalness:0.03 });
+const mountainMintSpots=[];
+for(let si=0;si<mountainTrailSegments.length;si++) {
+  const segment=mountainTrailSegments[si];
+  const count=Math.floor(MOUNTAIN_MINT_TOTAL/mountainTrailSegments.length)+(si<MOUNTAIN_MINT_TOTAL%mountainTrailSegments.length?1:0);
+  for(let j=0;j<count;j++) {
+    const t=(j+0.72)/(count+0.56), off=(j%2===0?-2.8:2.8);
+    const pt=mountainPointOnSegment(segment,t,off);
+    mountainMintSpots.push({x:pt.x,z:pt.z,surfaceY:pt.y});
+  }
+}
+if(mountainMintSpots.length!==MOUNTAIN_MINT_TOTAL || mountainMintSpots.length<MOUNTAIN_MINT_REQUIREMENT) throw new Error(`Blue Ridge Mountain requires ${MOUNTAIN_MINT_REQUIREMENT} mints and must spawn ${MOUNTAIN_MINT_TOTAL}; found ${mountainMintSpots.length}.`);
+const mountainMints=[];
+for(let i=0;i<mountainMintSpots.length;i++) {
+  const spot=mountainMintSpots[i], group=new THREE.Group();
+  const disk=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.37,0.15,28),mountainMintMaterial); disk.castShadow=true; group.add(disk);
+  const rim=new THREE.Mesh(new THREE.TorusGeometry(0.325,0.032,8,28),mountainMintRimMaterial); rim.rotation.x=Math.PI/2; rim.position.y=0.078; group.add(rim);
+  const hole=new THREE.Mesh(new THREE.TorusGeometry(0.12,0.04,8,18),mountainMintRimMaterial); hole.rotation.x=Math.PI/2; hole.position.y=0.10; group.add(hole);
+  group.position.set(spot.x,spot.surfaceY+1.05,spot.z); mountainWorld.add(group);
+  mountainMints.push({group,x:spot.x,z:spot.z,surfaceY:spot.surfaceY,phase:rand()*Math.PI*2,collected:false});
+}
+if(mountainMints.length!==MOUNTAIN_MINT_TOTAL || mountainMints.length<MOUNTAIN_MINT_REQUIREMENT) throw new Error(`Blue Ridge Mountain generated ${mountainMints.length}; goal ${MOUNTAIN_MINT_REQUIREMENT}.`);
+const mountainGustGroup = new THREE.Group(); mountainGustGroup.visible=false; mountainWorld.add(mountainGustGroup);
+const mountainGustMaterial = new THREE.MeshBasicMaterial({color:'#e9f5ff',transparent:true,opacity:0.68,depthWrite:false});
+const mountainGustStreaks=[];
+for(let i=0;i<58;i++) {
+  const streak=new THREE.Mesh(new THREE.CapsuleGeometry(0.025,0.45+rand()*0.95,2,5),mountainGustMaterial);
+  streak.rotation.z=Math.PI/2; streak.visible=true; mountainGustGroup.add(streak);
+  mountainGustStreaks.push({mesh:streak,phase:rand()*Math.PI*2,span:8+rand()*30,height:0.5+rand()*5.4});
+}
+
 // --- Friends (each is a little plush with its own name, colour, and conversation) ------------------
 function makeNameSprite(name) {
   const c = document.createElement('canvas'); c.width = 384; c.height = 112;
@@ -1462,6 +1637,17 @@ const bridgeFriendLines = {
   Kiki: ['I planted a flower beside the top bridge. It is very proud of itself.','The view from this high up makes the meadow look like a felt blanket.','One more mint and the whole bridge garden will be yours.'],
 };
 for (const friend of friends) friend.bridgeLines = bridgeFriendLines[friend.name] || ['The bridges are taller than they look.','Ivy makes everything feel a little more magical.','See you on the next bridge!'];
+const mountainFriendLines = {
+  Momo:['The ridge turns blue when the clouds drift through it.','I found a mint so crisp it made my feelers tingle.','Lean into the gusts, but not too much, or you will tumble to the base!'],
+  Purin:['Every little ledge is a place to catch your breath.','Those blue ridges are made-up mountains, but I still think they look grand.','I saved a spot near the summit where the breeze sounds like a flute.'],
+  Mugi:['I brought a very small picnic. The wind keeps trying to borrow it.','Fresh mountain mints taste cool like morning air.','The switchback path is easier than climbing straight up.'],
+  Sora:['From up here the whole meadow looks like a green quilt.','Wait for a gust to pass before jumping to the next ledge.','I can see three different shades of blue in the ridge.'],
+  Mizu:['These rocks have been polished by a thousand tiny breezes.','I tried to count the ridges and lost count at seventeen.','There is a fresh mint just around the next bend.'],
+  Lulu:['Mountain air makes my ribbon flutter all by itself.','The safest path zig-zags instead of going straight up.','Do you think the summit can see the ocean?'],
+  Berry:['This is the freshest mint patch of all four worlds.','I tucked a little charm under that blue rock.','Take your time. The summit is not going anywhere.'],
+  Kiki:['A gust nearly carried my flower away, but I held on!','See how the path is made of broad stone shelves?','The view from the top is worth all the little hops.'],
+};
+for (const friend of friends) friend.mountainLines = mountainFriendLines[friend.name] || ['The blue ridge feels wonderfully breezy.','Fresh mint grows all along the switchback path.','I will meet you nearer the summit.'];
 
 // Little biome wildlife adds life without becoming a friend, enemy, or interaction target.
 const ambientCreatureRecords = [];
@@ -1545,7 +1731,7 @@ function makeAmbientCreature(kind, parent, x, z, y = 0, color = '#a66d45', index
     beetle: { speed: 0.92, wander: 4.6 }, centipede: { speed: 0.84, wander: 5.2 },
     cricket: { speed: 1.22, wander: 2.8 }, spider: { speed: 0.74, wander: 0.68 },
   }[kind] || { speed: 0.72, wander: 2.5 };
-  ambientCreatureRecords.push({ kind, group, homeX:x, homeY:y, homeZ:z, phase:rand()*Math.PI*2, speed: creatureMotion.speed, wander: creatureMotion.wander, index, animatedLegs });
+  ambientCreatureRecords.push({ kind, group, homeX:x, homeY:y, homeZ:z, phase:rand()*Math.PI*2, speed: creatureMotion.speed, wander: creatureMotion.wander, index, animatedLegs, heading: rand()*Math.PI*2, nextTurnAt: performance.now()+1200+rand()*2200, turnUntil: 0, turnDir: rand()<0.5?-1:1 });
   return group;
 }
 // Meadow: beetles and centipedes trundle through the grass, safely ignoring the player.
@@ -1559,6 +1745,10 @@ for (let i=0;i<3;i++) makeAmbientCreature('cricket', bridgeCritterWorld, -45+i*3
 for (let i=0;i<3;i++) {
   const p = bridgePlatforms[[0,4,7][i]], pt = localBridgePoint(p, (i-1)*5, 0);
   makeAmbientCreature('spider', bridgeCritterWorld, pt.x, pt.z, p.y + 0.02, ['#4c3d36','#655447','#483d3a'][i], i);
+}
+for(let i=0;i<4;i++) {
+  const segment=mountainTrailSegments[i*2], pt=mountainPointOnSegment(segment,0.42, i%2 ? 4.0 : -4.0);
+  makeAmbientCreature(i%2?'centipede':'beetle',mountainCritterWorld,pt.x,pt.z,pt.y,['#728a9f','#7e9b9b','#6c849d','#9c9a8b'][i],i);
 }
 
 // Collectible fizzy pearls lead to little discoveries, but are scattered in an open, explorable space.
@@ -1608,7 +1798,7 @@ function addBumpyThing(x, z, scale = 1, color = '#f3b1c5', drift = 0) {
     bump.scale.set(1,0.78,1); group.add(bump);
   }
   group.position.set(x, 0, z); group.scale.setScalar(scale); scene.add(group);
-  obstacles.push({ type: 'bumpy', group, baseX: x, x, z, scale, radius: 0.83*scale, solidHeight: 1.34*scale, drift, phase: rand()*Math.PI*2, bonkAt: 0 });
+  obstacles.push({ type: 'bumpy', group, baseX: x, x, z, scale, radius: 0.83*scale, solidHeight: 1.34*scale, drift: 0, phase: rand()*Math.PI*2, bonkAt: 0, bumpX: 0, bumpZ: 0, bumpVX: 0, bumpVZ: 0 });
 }
 function addJellyBar(x, z, rotation = 0, scale = 1, color = '#ffa8b8') {
   const group = new THREE.Group();
@@ -1626,7 +1816,7 @@ function addJellyBar(x, z, rotation = 0, scale = 1, color = '#ffa8b8') {
     sprinkle.position.set(-1.25 + i*0.31, 0.79, (i%2 ? 0.12 : -0.10)); group.add(sprinkle);
   }
   group.position.set(x,0,z); group.rotation.y=rotation; group.scale.setScalar(scale); scene.add(group);
-  obstacles.push({type:'bar',group,x,z,rotation,scale,halfLength:1.72*scale,halfWidth:0.47*scale,clearance:0.74*scale,bonkAt:0});
+  obstacles.push({type:'bar',group,baseX:x,x,z,rotation,scale,halfLength:1.72*scale,halfWidth:0.47*scale,clearance:0.74*scale,bonkAt:0,bumpX:0,bumpZ:0,bumpVX:0,bumpVZ:0});
 }
 [
   [-9,1,1.0,'#f3b1c5',0], [7,-5,1.08,'#c7b5f1',2.0], [29,-2,1.1,'#ffdf91',0],
@@ -1642,7 +1832,7 @@ function addJellyBar(x, z, rotation = 0, scale = 1, color = '#ffa8b8') {
 const state = {
   started: false, paused: false, x: 0, y: 0, z: 12,
   vx: 0, vy: 0, vz: 0, yaw: Math.PI, knockbackUntil: 0,
-  pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
+  pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, mountainMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
   mintGiftClaimed: false, stageAwaitingTap: false,
   highJumpUntil: 0, highJumpWasActive: false, bridgeStageComplete: false,
   activeFriend: null, activeDialogueLines: null, toastUntil: 0, bob: 0,
@@ -1769,6 +1959,7 @@ function updateWeatherReadout() {
     chip.textContent = seaCurrent.active ? `🫧 Bubbly current · ${skyLabel} above` : `🌊 ${skyLabel} above`;
     return;
   }
+  if (worldMode === 'mountain' && weather.kind === 'wind') { chip.textContent = `💨 Ridge gusts · ${skyLabel}`; return; }
   if (weather.kind === 'rain') { chip.textContent = `🌧 Light rain · ${skyLabel}`; return; }
   if (weather.kind === 'wind') { chip.textContent = `🍃 Windy · ${skyLabel}`; return; }
   if (skyCloudiness < 0.20) chip.textContent = '☀ Clear skies';
@@ -1785,7 +1976,7 @@ function setWeather(kind, now) {
   weather.kind = kind;
   if (kind === 'clear') {
     weather.until = 0; weather.windX = 0; weather.windZ = 0;
-    weather.nextAt = now + 13000 + rand() * 21000;
+    weather.nextAt = now + (worldMode === 'mountain' ? 5500 + rand() * 8500 : 13000 + rand() * 21000);
   } else {
     weather.until = now + 14000 + rand() * 9000;
     if (kind === 'wind') {
@@ -1796,12 +1987,12 @@ function setWeather(kind, now) {
     }
   }
   rainLines.visible = kind === 'rain' && state.started && !state.paused;
-  for (const leaf of windLeaves) leaf.visible = kind === 'wind' && state.started && !state.paused;
+  for (const leaf of windLeaves) leaf.visible = kind === 'wind' && worldMode !== 'water' && worldMode !== 'mountain' && state.started && !state.paused;
   // Couple the weather effect to the sky texture immediately rather than waiting for the next clock tick.
   if (weatherInitialized) chooseSkyMood(now);
   updateWeatherReadout();
   updateWeatherAudio();
-  if (state.started && !state.paused && kind !== 'clear') toast(kind === 'rain' ? 'A little meadow shower!' : (worldMode === 'bridge' ? 'A breezy canopy gust!' : 'A meadow gust is stirring the grass!'));
+  if (state.started && !state.paused && kind !== 'clear') toast(kind === 'rain' ? (worldMode === 'mountain' ? 'A cool ridge shower!' : 'A little meadow shower!') : (worldMode === 'mountain' ? 'A strong ridge gust is sweeping across the trail!' : (worldMode === 'bridge' ? 'A breezy canopy gust!' : 'A meadow gust is stirring the grass!')));
 }
 function updateWeather(dt, now) {
   if (worldMode === 'water') {
@@ -1830,10 +2021,11 @@ function updateWeather(dt, now) {
     return;
   }
   if (weather.kind !== 'clear' && now >= weather.until) setWeather('clear', now);
-  else if (weather.kind === 'clear' && now >= weather.nextAt) setWeather(rand() < 0.38 ? 'rain' : 'wind', now);
+  else if (weather.kind === 'clear' && now >= weather.nextAt) setWeather(worldMode === 'mountain' ? (rand() < 0.78 ? 'wind' : 'rain') : (rand() < 0.38 ? 'rain' : 'wind'), now);
 
   rainLines.visible = weather.kind === 'rain';
-  for (const leaf of windLeaves) leaf.visible = weather.kind === 'wind';
+  for (const leaf of windLeaves) leaf.visible = weather.kind === 'wind' && worldMode !== 'mountain';
+  if (typeof mountainGustGroup !== 'undefined') mountainGustGroup.visible = worldMode === 'mountain' && weather.kind === 'wind' && state.started && !state.paused;
   if (weather.kind === 'rain') {
     rainLines.position.set(state.x, 0, state.z);
     for (let i = 0; i < RAIN_COUNT; i++) {
@@ -1892,13 +2084,13 @@ function sparkle(position, count = 16) {
 }
 const particles = [];
 function updateHUD() {
-  const stage = worldMode === 'water' ? 'water' : (worldMode === 'bridge' ? 'bridge' : 'meadow');
-  const count = stage === 'water' ? state.waterMintsCollected : (stage === 'bridge' ? state.bridgeMintsCollected : state.pearls);
-  const limit = stage === 'water' ? waterMints.length : (stage === 'bridge' ? bridgeMints.length : (pearls.length + 1));
+  const stage = worldMode === 'water' ? 'water' : (worldMode === 'bridge' ? 'bridge' : (worldMode === 'mountain' ? 'mountain' : 'meadow'));
+  const count = stage === 'water' ? state.waterMintsCollected : (stage === 'bridge' ? state.bridgeMintsCollected : (stage === 'mountain' ? state.mountainMintsCollected : state.pearls));
+  const limit = stage === 'water' ? waterMints.length : (stage === 'bridge' ? bridgeMints.length : (stage === 'mountain' ? mountainMints.length : (pearls.length + 1)));
   $('#pearl-count').textContent = String(count);
   const pearlLimit = $('#pearl-limit'); if (pearlLimit) pearlLimit.textContent = `/ ${limit}`;
-  const pearlIcon = document.querySelector('.pearls-stat .stat-icon'); if (pearlIcon) pearlIcon.textContent = stage === 'water' ? '❋' : (stage === 'bridge' ? '◉' : '✧');
-  const label = $('#pearls-stat-label'); if (label) label.textContent = stage === 'water' ? 'SEA MINTS' : (stage === 'bridge' ? 'BRIDGE MINTS' : 'FIZZ');
+  const pearlIcon = document.querySelector('.pearls-stat .stat-icon'); if (pearlIcon) pearlIcon.textContent = stage === 'water' ? '❋' : (stage === 'bridge' ? '◉' : (stage === 'mountain' ? '❄' : '✧'));
+  const label = $('#pearls-stat-label'); if (label) label.textContent = stage === 'water' ? 'SEA MINTS' : (stage === 'bridge' ? 'BRIDGE MINTS' : (stage === 'mountain' ? 'FRESH MINTS' : 'FIZZ'));
   $('#friend-count').textContent = `${state.friendsMet}/${friends.length}`;
   $('#score-count').textContent = String(state.score).padStart(5, '0');
   const fill = $('#friend-progress');
@@ -1918,12 +2110,12 @@ function drawMinimap() {
   const mapX = x => 7 + ((x + 110) / 220) * (w - 14);
   const mapY = z => 7 + ((z + 110) / 220) * (h - 14);
   // Uncollected mint pearls; the Water World uses bright blue seafoam mints.
-  const visibleCollectibles = worldMode === 'water' ? waterMints : (worldMode === 'bridge' ? bridgeMints : pearls);
+  const visibleCollectibles = worldMode === 'water' ? waterMints : (worldMode === 'bridge' ? bridgeMints : (worldMode === 'mountain' ? mountainMints : pearls));
   for (const item of visibleCollectibles) if (!item.collected) {
     const x = mapX(item.x), y = mapY(item.z);
-    ctx.fillStyle = worldMode === 'water' ? 'rgba(44,211,231,.24)' : (worldMode === 'bridge' ? 'rgba(171,138,83,.24)' : 'rgba(48,183,164,.22)');
+    ctx.fillStyle = worldMode === 'water' ? 'rgba(44,211,231,.24)' : (worldMode === 'bridge' ? 'rgba(171,138,83,.24)' : (worldMode === 'mountain' ? 'rgba(179,224,251,.30)' : 'rgba(48,183,164,.22)'));
     ctx.beginPath(); ctx.arc(x, y, 4.6, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = worldMode === 'water' ? '#24c7db' : (worldMode === 'bridge' ? '#9d7745' : '#35b9a6');
+    ctx.fillStyle = worldMode === 'water' ? '#24c7db' : (worldMode === 'bridge' ? '#9d7745' : (worldMode === 'mountain' ? '#6eacd7' : '#35b9a6'));
     ctx.beginPath(); ctx.arc(x, y, 2.65, 0, Math.PI * 2); ctx.fill();
     if (worldMode === 'water') { ctx.strokeStyle = '#f2ffff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x-1.2,y); ctx.lineTo(x+1.2,y); ctx.stroke(); }
   }
@@ -1999,7 +2191,7 @@ function talkToNearest() {
   const f = near.friend;
   // If the player is already overlapping a pal, make a little room before the chat pose.
   separateFromFriend(f, true);
-  const lines = worldMode === 'water' && Array.isArray(f.seaLines) ? f.seaLines : (worldMode === 'bridge' && Array.isArray(f.bridgeLines) ? f.bridgeLines : f.lines);
+  const lines = worldMode === 'water' && Array.isArray(f.seaLines) ? f.seaLines : (worldMode === 'bridge' && Array.isArray(f.bridgeLines) ? f.bridgeLines : (worldMode === 'mountain' && Array.isArray(f.mountainLines) ? f.mountainLines : f.lines));
   state.activeDialogueLines = lines;
   state.activeFriend = f;
   state.y = f.worldFloorY || 0; state.vy = 0;
@@ -2019,7 +2211,7 @@ function talkToNearest() {
     toast(`Made a new friend: ${f.name}!`);
     updateHUD();
   }
-  $('#dialogue-kicker').textContent = worldMode === 'water' ? 'A WATER WORLD HELLO' : (worldMode === 'bridge' ? 'A BRIDGE WORLD HELLO' : 'A MEADOW HELLO');
+  $('#dialogue-kicker').textContent = worldMode === 'water' ? 'A WATER WORLD HELLO' : (worldMode === 'bridge' ? 'A BRIDGE WORLD HELLO' : (worldMode === 'mountain' ? 'A BLUE RIDGE HELLO' : 'A MEADOW HELLO'));
   $('#dialogue-next').textContent = lines.length > 1 ? 'Keep chatting  →' : 'Goodbye  ✦';
   sfx(660, 0.16, 'sine', 0.14); setTimeout(() => sfx(880, 0.2, 'triangle', 0.11), 90);
 }
@@ -2051,7 +2243,7 @@ function jumpOrInteract() {
   if (state.activeFriend) { advanceDialogue(); return false; }
   if (nearestFriend()) { talkToNearest(); return false; }
   held.jump = true;
-  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : 0;
+  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : (worldMode === 'mountain' ? mountainSupportBelow(state.x,state.z,state.y) : 0);
   if (state.y <= supportY + 0.025 && state.vy <= 0) state.vy = performance.now() < state.highJumpUntil ? 14.6 : 7.5;
   sfx(420, 0.07, 'sine', 0.035);
   return true;
@@ -2060,19 +2252,19 @@ $('#dialogue-next').addEventListener('click', advanceDialogue);
 $('#dialogue-close').addEventListener('click', closeDialogue);
 
 function startStageFinale(targetWorld = 'water') {
-  if (state.finale.active || (worldMode === 'meadow' && targetWorld !== 'water') || (worldMode === 'water' && targetWorld === 'water') || (worldMode === 'bridge' && targetWorld !== 'complete')) return;
+  if (state.finale.active || (worldMode === 'meadow' && targetWorld !== 'water') || (worldMode === 'water' && targetWorld !== 'bridge') || (worldMode === 'bridge' && targetWorld !== 'mountain') || (worldMode === 'mountain' && targetWorld !== 'complete')) return;
   state.finale.active = true; state.finale.targetWorld = targetWorld; state.finale.startAt = performance.now(); state.finale.baseYaw = state.yaw;
   state.stageAwaitingTap = false; $('#stage-continue-button').classList.add('is-hidden'); $('#finale-overlay').classList.remove('waiting-for-stage-tap');
   state.finale.camOffset.set(camera.position.x - state.x, camera.position.y - state.y, camera.position.z - state.z);
-  state.finale.danceY = targetWorld === 'complete' ? state.y : 0;
+  state.finale.danceY = (targetWorld === 'complete' || targetWorld === 'mountain') ? state.y : 0;
   state.finale.cameraYaw = Math.atan2(2.65, 6.9);
   state.finale.fovStart = camera.fov; state.finale.enteredWater = false; state.finale.overlayShown = false;
   state.vx = state.vy = state.vz = 0; state.y = state.finale.danceY; state.paused = false;
   clearHeld(); $('#talk-prompt').classList.add('is-hidden'); $('#toast').classList.remove('show');
   touchControls.classList.add('finale-lock'); $('#pause-toggle').disabled = true;
-  $('#finale-kicker').textContent = worldMode === 'meadow' ? 'EVERY LAST DROP' : (targetWorld === 'bridge' ? 'SEAFOAM SET COMPLETE' : 'BRIDGE GARDEN COMPLETE');
-  $('#finale-title').textContent = worldMode === 'meadow' ? 'You found every fizz!' : (targetWorld === 'bridge' ? 'A bridge to a new world!' : 'Every bridge mint found!');
-  $('#finale-subtitle').textContent = worldMode === 'meadow' ? 'A little celebration… then, something is bubbling beneath the meadow.' : (targetWorld === 'bridge' ? 'The ivy-covered bridges are waiting above the treetops.' : 'You have explored every level of the Bridge World.');
+  $('#finale-kicker').textContent = worldMode === 'meadow' ? 'EVERY LAST DROP' : (targetWorld === 'bridge' ? 'SEAFOAM SET COMPLETE' : (targetWorld === 'mountain' ? 'BRIDGE GARDEN COMPLETE' : 'SUMMIT REACHED'));
+  $('#finale-title').textContent = worldMode === 'meadow' ? 'You found every fizz!' : (targetWorld === 'bridge' ? 'A bridge to a new world!' : (targetWorld === 'mountain' ? 'The Blue Ridge awaits!' : 'A fresh mint summit!'));
+  $('#finale-subtitle').textContent = worldMode === 'meadow' ? 'A little celebration… then, something is bubbling beneath the meadow.' : (targetWorld === 'bridge' ? 'The ivy-covered bridges are waiting above the treetops.' : (targetWorld === 'mountain' ? 'The high trails lead toward a blue mountain ridge.' : 'You climbed the Blue Ridge and found its freshest mints.'));
   sfx(784, 0.16, 'triangle', 0.15); setTimeout(() => sfx(988, 0.18, 'triangle', 0.14), 105);
   setTimeout(() => sfx(1175, 0.20, 'sine', 0.14), 220); setTimeout(() => sfx(1568, 0.36, 'sine', 0.16), 345);
 }
@@ -2090,7 +2282,7 @@ function enterWaterWorld(now) {
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
   for (const obj of [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects]) obj.visible = false;
   for (const obstacle of obstacles) obstacle.group.visible = false;
-  waterWorld.visible = true;
+  waterWorld.visible = true; bridgeWorld.visible = false; mountainWorld.visible = false;
   skyDome.visible = true; sun.visible = false; moonLight.visible = true; if (moonMesh) moonMesh.visible = false;
   $('#pearls-stat-label')?.replaceChildren(document.createTextNode('SEA MINTS'));
   const brandEyebrow = document.querySelector('.brand-copy .eyebrow'); if (brandEyebrow) brandEyebrow.textContent = 'WATER WORLD';
@@ -2132,7 +2324,7 @@ function enterBridgeWorld(now) {
   const meadowObjects = [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects];
   for (const obj of meadowObjects) obj.visible = false;
   for (const obstacle of obstacles) obstacle.group.visible = false;
-  waterWorld.visible = false; bridgeWorld.visible = true; seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.strength = 0;
+  waterWorld.visible = false; bridgeWorld.visible = true; mountainWorld.visible = false; seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.strength = 0;
   skyDome.visible = true; sun.visible = true; moonLight.visible = true;
   if (moonMesh) moonMesh.visible = false;
   for (const item of decorBubbles) item.group.visible = false;
@@ -2175,6 +2367,42 @@ function enterBridgeWorld(now) {
   sfx(392, 0.3, 'sine', 0.12); setTimeout(() => sfx(523, 0.32, 'triangle', 0.1), 145); setTimeout(() => sfx(659, 0.42, 'sine', 0.12), 300);
 }
 
+
+function enterMountainWorld(now) {
+  if(worldMode==='mountain') return;
+  worldMode='mountain'; state.finale.enteredWater=true;
+  // Empty every remaining Bridge Mint as this next stage loads.
+  for(const mint of bridgeMints){mint.collected=true;mint.group.visible=false;}
+  state.stageAwaitingTap=true; state.paused=true;
+  const arrivalButton=$('#stage-continue-button'); arrivalButton.innerHTML='Climb Blue Ridge Mountain <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
+  state.mountainMintsCollected=0; state.bridgeStageComplete=false; state.highJumpUntil=0; state.highJumpWasActive=false;
+  if(player.userData.cherryMesh){player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor); if(player.userData.cherryMesh.material.emissive)player.userData.cherryMesh.material.emissiveIntensity=0;}
+  const start=mountainTrailNodes[0]; state.x=start.x; state.y=start.y; state.z=start.z; state.vx=state.vy=state.vz=0; state.yaw=Math.PI;
+  state.friendsMet=0;
+  const meadowObjects=[meadowBase,meadow,meadowBlades,mossPatches,stoneInstances,pebbleInstances,petalMesh,flowerCenterMesh,flowerStemMesh,safetyGround,grassBlades,...landDecorationObjects,...landBoundaryObjects];
+  for(const obj of meadowObjects)obj.visible=false;
+  for(const obstacle of obstacles)obstacle.group.visible=false;
+  waterWorld.visible=false; bridgeWorld.visible=false; mountainWorld.visible=true; seaCurrent.active=false; seaCurrentFx.visible=false; seaCurrent.strength=0;
+  for(const item of decorBubbles)item.group.visible=false;
+  for(const friend of friends) {
+    friend.met=false; friend.bobble.group.visible=false;
+    const segment=mountainTrailSegments[Math.min(mountainTrailSegments.length-1,Math.floor(friends.indexOf(friend)*mountainTrailSegments.length/friends.length))];
+    const pt=mountainPointOnSegment(segment,0.35+(friends.indexOf(friend)%3)*0.14,(friends.indexOf(friend)%2?4.0:-4.0));
+    friend.x=pt.x; friend.z=pt.z; friend.worldFloorY=pt.y;
+    friend.slug.position.set(pt.x,pt.y,pt.z); friend.slug.rotation.y=Math.atan2(state.x-pt.x,state.z-pt.z);
+    friend.nameSprite.position.set(pt.x,pt.y+4.05,pt.z); friend.bobble.y=pt.y+3.5; friend.bobble.group.position.set(pt.x+1.4,friend.bobble.y,pt.z);
+  }
+  $('#pearls-stat-label')?.replaceChildren(document.createTextNode('FRESH MINTS'));
+  const eyebrow=document.querySelector('.brand-copy .eyebrow'); if(eyebrow) eyebrow.textContent='BLUE RIDGE MOUNTAIN';
+  const hint=document.querySelector('.world-hint span:last-child'); if(hint) hint.textContent='Blue Ridge Mountain · hike the switchbacks, hop the ledges, watch the gusts';
+  const mapTitle=document.querySelector('.map-heading b'); if(mapTitle) mapTitle.textContent='BLUE RIDGE MAP';
+  $('#finale-kicker').textContent='WELCOME TO BLUE RIDGE'; $('#finale-title').textContent='Blue Ridge Mountain';
+  $('#finale-subtitle').textContent='A blue mountain ridge, winding hiking paths, fresh mints, and lively gusts. Keep your footing—strong winds can tumble you back to the base.';
+  scene.fog=new THREE.Fog('#9eb9c8',105,285); hemi.color.set('#dcebf1'); hemi.groundColor.set('#354d5e'); fillLight.color.set('#bed9e9'); shadow.material.color.set('#243949'); shadow.material.opacity=0.32;
+  setWeather('wind',now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout();
+  sfx(392,0.3,'sine',0.12); setTimeout(()=>sfx(523,0.32,'triangle',0.1),145); setTimeout(()=>sfx(659,0.42,'sine',0.12),300);
+}
+
 function updateFizzFinale(now) {
   const f = state.finale, elapsed = (now - f.startAt) / 1000;
   const smooth = (v) => { v = THREE.MathUtils.clamp(v, 0, 1); return v * v * (3 - 2 * v); };
@@ -2211,7 +2439,8 @@ function updateFizzFinale(now) {
   if (elapsed >= 3.78 && !f.enteredWater) {
     if (f.targetWorld === 'water') enterWaterWorld(now);
     else if (f.targetWorld === 'bridge') enterBridgeWorld(now);
-    else if (f.targetWorld === 'complete') { state.bridgeStageComplete = true; f.enteredWater = true; $('#finale-kicker').textContent = 'BRIDGE GARDEN COMPLETE'; $('#finale-title').textContent = 'Every mint, every bridge!'; $('#finale-subtitle').textContent = 'The whole treetop garden is yours to wander.'; $('#finale-overlay').classList.add('is-visible'); sfx(880, 0.25, 'triangle', 0.14); }
+    else if (f.targetWorld === 'mountain') enterMountainWorld(now);
+    else if (f.targetWorld === 'complete') { state.bridgeStageComplete = true; f.enteredWater = true; $('#finale-kicker').textContent = 'BLUE RIDGE SUMMIT'; $('#finale-title').textContent = 'You reached the summit!'; $('#finale-subtitle').textContent = 'The fresh mountain mints are yours. Take in the blue ridge breeze.'; $('#finale-overlay').classList.add('is-visible'); sfx(880, 0.25, 'triangle', 0.14); }
   }
   if (elapsed >= 4.3 && f.targetWorld !== 'complete' && !state.stageAwaitingTap) $('#finale-overlay').classList.remove('is-visible');
   if (elapsed >= 5.78) {
@@ -2252,10 +2481,21 @@ function collectBridgeMint(mint) {
   sfx(1010, 0.11, 'sine', 0.12); setTimeout(() => sfx(1390, 0.13, 'triangle', 0.1), 50);
   updateHUD(); drawMinimap();
   if (state.bridgeMintsCollected >= BRIDGE_MINT_REQUIREMENT) {
-    toast('Bridge garden complete!');
-    startStageFinale('complete');
+    toast('Bridge garden complete! The Blue Ridge is next…');
+    startStageFinale('mountain');
   } else toast('Bridge mint! One step closer to the canopy.');
 }
+function collectMountainMint(mint) {
+  if (mint.collected || worldMode !== 'mountain' || state.finale.active) return;
+  mint.collected = true; mint.group.visible = false; state.mountainMintsCollected++; state.score += 65;
+  sparkle(new THREE.Vector3(mint.x, mint.surfaceY + 1.05, mint.z), 18);
+  sfx(1180,0.12,'sine',0.13); setTimeout(()=>sfx(1560,0.15,'triangle',0.1),55);
+  updateHUD(); drawMinimap();
+  if(state.mountainMintsCollected >= MOUNTAIN_MINT_REQUIREMENT) {
+    toast('All fresh mountain mints found! Summit celebration!'); startStageFinale('complete');
+  } else toast('Fresh mint! Cool as the ridge wind.');
+}
+
 function collectHighJumpPowerup(powerup, now) {
   if (worldMode !== 'bridge' || state.finale.active || powerup.collected || now < powerup.respawnAt) return;
   powerup.collected = true; powerup.group.visible = false; powerup.respawnAt = now + 13500;
@@ -2328,14 +2568,16 @@ function flashObstacle(o, now) {
     }
   });
 }
-function updateObstacleMotion(now) {
+function updateObstacleMotion(dt, now) {
   for (const o of obstacles) {
-    if (o.type === 'bumpy') {
-      o.x = o.baseX + Math.sin(now * 0.0012 + o.phase) * o.drift;
-      o.group.position.x = o.x;
-      o.group.position.y = Math.max(0, Math.sin(now*0.003 + o.phase))*0.055;
-      o.group.rotation.z = Math.sin(now*0.0032 + o.phase)*0.035;
-    }
+    // Boing blocks are inert and fixed until the player collides with them. Only hit impulses move them.
+    o.bumpVX *= Math.exp(-dt * 5.2); o.bumpVZ *= Math.exp(-dt * 5.2);
+    o.bumpX += o.bumpVX * dt; o.bumpZ += o.bumpVZ * dt;
+    o.bumpX *= Math.exp(-dt * 0.65); o.bumpZ *= Math.exp(-dt * 0.65);
+    o.x = o.baseX + o.bumpX;
+    o.group.position.x = o.x; o.group.position.z = o.z + o.bumpZ;
+    o.group.position.y = 0;
+    o.group.rotation.z = 0;
     if (o.flashUntil && now >= o.flashUntil) {
       o.group.traverse(obj => {
         if (!obj.isMesh) return;
@@ -2369,8 +2611,9 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
       const nlx = lx/(rx*rx), nlz = lz/(rz*rz), nlen = Math.hypot(nlx,nlz)||1;
       const nx = (nlx*c + nlz*sn)/nlen, nz = (-nlx*sn + nlz*c)/nlen;
       if (now > o.bonkAt) {
-        state.vx = nx * 18.5; state.vz = nz * 18.5; state.knockbackUntil = now + 460;
-        if (state.y < 0.14) state.vy = Math.max(state.vy, 4.6);
+        state.vx = nx * 25.5; state.vz = nz * 25.5; state.knockbackUntil = now + 650;
+        if (state.y < 0.14) state.vy = Math.max(state.vy, 5.6);
+        o.bumpVX = -nx * 3.8; o.bumpVZ = -nz * 3.8;
         o.bonkAt = now + 700; flashObstacle(o, now); toast('BOI-OI-OING!'); playBoing();
       }
     } else {
@@ -2387,8 +2630,9 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
         let bx = attemptDX, bz = attemptDZ;
         if (Math.hypot(bx, bz) < 0.01) { bx = oldX - o.x; bz = oldZ - o.z; }
         const backLen = Math.hypot(bx, bz) || 1;
-        state.vx = -(bx / backLen) * 16.5; state.vz = -(bz / backLen) * 16.5; state.knockbackUntil = now + 420;
-        if (state.y < 0.14) state.vy = Math.max(state.vy, 3.9);
+        state.vx = -(bx / backLen) * 23.0; state.vz = -(bz / backLen) * 23.0; state.knockbackUntil = now + 600;
+        if (state.y < 0.14) state.vy = Math.max(state.vy, 4.8);
+        o.bumpVX = (bx / backLen) * 3.2; o.bumpVZ = (bz / backLen) * 3.2;
         o.bonkAt = now + 850; flashObstacle(o, now); toast('BIG BOING! Try hopping over it.'); playBoing();
       }
     }
@@ -2461,7 +2705,8 @@ function findBridgeLanding(oldY, newY, x, z) {
 function constrainToBridgeRails() {
   if (worldMode !== 'bridge') return;
   for (const platform of bridgePlatforms) {
-    if (Math.abs(state.y - platform.y) > 1.25) continue;
+    // Only constrain against rails once the player's foot level reaches that deck; this leaves room to hop up from a nearby lower deck.
+    if (state.y < platform.y - 0.12 || state.y > platform.y + 1.25) continue;
     const dx = state.x - platform.x, dz = state.z - platform.z;
     const c = Math.cos(platform.rotation), sn = Math.sin(platform.rotation);
     const lx = dx*c - dz*sn, lz = dx*sn + dz*c;
@@ -2492,7 +2737,7 @@ function updatePlayer(dt, now) {
   const oldX = state.x, oldZ = state.z, oldY = state.y;
   const planarLen = Math.hypot(ix, iz) || 1;
   const speed = 8.8;
-  const windDrift = (worldMode !== 'water' && weather.kind === 'wind') ? 2.65 : 0;
+  const windDrift = worldMode === 'mountain' && weather.kind === 'wind' ? 8.2 : ((worldMode !== 'water' && weather.kind === 'wind') ? 2.65 : 0);
   const seaPush = worldMode === 'water' && seaCurrent.active ? seaCurrent.strength : 0;
   const pushX = worldMode === 'water' ? seaCurrent.x * seaPush : weather.windX * windDrift;
   const pushZ = worldMode === 'water' ? seaCurrent.z * seaPush : weather.windZ * windDrift;
@@ -2506,7 +2751,7 @@ function updatePlayer(dt, now) {
     state.vx += (targetVX - state.vx) * smooth;
     state.vz += (targetVZ - state.vz) * smooth;
   }
-  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : 0;
+  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : (worldMode === 'mountain' ? mountainSupportBelow(state.x,state.z,state.y) : 0);
   const jumpPower = now < state.highJumpUntil ? 14.6 : 7.5;
   if (held.jump && state.y <= supportY + 0.025 && state.vy <= 0) {
     state.vy = jumpPower;
@@ -2517,9 +2762,12 @@ function updatePlayer(dt, now) {
   if (worldMode === 'bridge') {
     const landing = findBridgeLanding(oldY, state.y, state.x, state.z);
     if (landing) { state.y = landing.y; if (state.vy < 0) state.vy = 0; }
+  } else if(worldMode === 'mountain') {
+    const landing=findMountainLanding(oldY,state.y,state.x,state.z);
+    if(landing){state.y=landing.y;if(state.vy<0)state.vy=0;}
   }
   if (state.y <= 0) { state.y = 0; if (state.vy < 0) state.vy = 0; }
-  const ceiling = worldMode === 'bridge' ? 34 : 8.2;
+  const ceiling = worldMode === 'bridge' ? 34 : (worldMode === 'mountain' ? 27 : 8.2);
   if (state.y >= ceiling) { state.y = ceiling; if (state.vy > 0) state.vy = 0; }
   state.x = THREE.MathUtils.clamp(state.x + state.vx * dt, -103, 103);
   state.z = THREE.MathUtils.clamp(state.z + state.vz * dt, -103, 103);
@@ -2550,31 +2798,59 @@ function updatePlayer(dt, now) {
   camera.up.set(0, 1, 0);
   camera.lookAt(state.x, state.y + 2.5, state.z - 1.4);
 }
-function updateAmbientCreatures(now) {
+function updateAmbientCreatures(dt, now) {
   for (const critter of ambientCreatureRecords) {
-    const t = now * 0.001 * critter.speed + critter.phase;
-    const dx = Math.cos(t) * critter.wander, dz = Math.sin(t * 0.83) * critter.wander * 0.68;
-    const tinyWind = worldMode !== 'water' && weather.kind === 'wind' ? 0.14 : 0; // Critters shelter low to the ground; the player gets the stronger gust.
-    critter.group.position.x = critter.homeX + dx + weather.windX * tinyWind * Math.sin(t * 0.34);
-    critter.group.position.z = critter.homeZ + dz + weather.windZ * tinyWind * Math.sin(t * 0.29 + 1.2);
-    if (critter.kind === 'fish') {
-      critter.group.position.y = critter.homeY + Math.sin(t * 1.7) * 0.72;
-      critter.group.rotation.z = Math.sin(t * 2.5) * 0.10; // Gentle swimming roll.
-    } else if (critter.kind === 'cricket') {
-      critter.group.position.y = critter.homeY + Math.pow(Math.max(0, Math.sin(t * 3.1)), 5) * 0.42;
-      critter.group.rotation.z = Math.sin(t * 3.2) * 0.075;
-    } else if (critter.kind === 'beetle' || critter.kind === 'centipede') {
-      critter.group.position.y = critter.homeY + Math.abs(Math.sin(t * 3.8)) * (critter.kind === 'centipede' ? 0.055 : 0.04);
-      critter.group.rotation.z = Math.sin(t * 3.4) * (critter.kind === 'centipede' ? 0.07 : 0.045);
-    } else {
-      critter.group.position.y = critter.homeY + Math.abs(Math.sin(t * 2.6)) * (critter.kind === 'crab' ? 0.09 : 0.035);
-      critter.group.rotation.z = Math.sin(t * 2.2) * (critter.kind === 'spider' ? 0.045 : 0.06);
+    const t = now * 0.001 + critter.phase;
+    const dxHome = critter.homeX - critter.group.position.x;
+    const dzHome = critter.homeZ - critter.group.position.z;
+    const radius = Math.hypot(dxHome, dzHome);
+
+    // Hold a heading for a while, then turn gradually and continue walking forward.
+    if (now >= critter.nextTurnAt) {
+      critter.turnDir = rand() < 0.5 ? -1 : 1;
+      critter.turnUntil = now + 650 + rand() * 850;
+      critter.turnRate = 0.72 + rand() * 0.62;
+      critter.nextTurnAt = now + 3000 + rand() * 4200;
     }
-    critter.group.rotation.y = Math.atan2(dx * critter.speed, dz * critter.speed);
-    const gait = Math.sin(t * (critter.kind === 'crab' || critter.kind === 'spider' ? 10.5 : 8.4));
+    if (now < critter.turnUntil) {
+      critter.heading += critter.turnDir * critter.turnRate * dt;
+    } else if (radius > critter.wander * 0.76) {
+      const homeHeading = Math.atan2(dxHome, dzHome);
+      let delta = ((homeHeading - critter.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      critter.heading += THREE.MathUtils.clamp(delta, -1.15 * dt, 1.15 * dt);
+    }
+    if (radius > critter.wander) {
+      // At the edge of its little territory, turn smoothly back inward rather than looping in place.
+      const homeHeading = Math.atan2(dxHome, dzHome);
+      let delta = ((homeHeading - critter.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      critter.heading += THREE.MathUtils.clamp(delta, -2.1 * dt, 2.1 * dt);
+    }
+
+    const gaitRate = critter.kind === 'crab' || critter.kind === 'spider' ? 11.5 : (critter.kind === 'centipede' ? 12.5 : 9.4);
+    const gait = Math.sin(t * gaitRate);
+    const windFactor = (worldMode === 'mountain' && weather.kind === 'wind') ? 0.035 : ((worldMode !== 'water' && weather.kind === 'wind') ? 0.012 : 0);
+    critter.group.position.x += Math.sin(critter.heading) * critter.speed * dt + weather.windX * windFactor * dt;
+    critter.group.position.z += Math.cos(critter.heading) * critter.speed * dt + weather.windZ * windFactor * dt;
+
+    if (critter.kind === 'fish') {
+      critter.group.position.y = critter.homeY + Math.sin(t * 1.7) * 0.45;
+      critter.group.rotation.z = Math.sin(t * 2.5) * 0.08;
+    } else if (critter.kind === 'cricket') {
+      critter.group.position.y = critter.homeY + Math.pow(Math.max(0, Math.sin(t * 3.1)), 6) * 0.38;
+      critter.group.rotation.z = Math.sin(t * 3.2) * 0.045;
+    } else if (critter.kind === 'beetle' || critter.kind === 'centipede') {
+      critter.group.position.y = critter.homeY + Math.abs(gait) * (critter.kind === 'centipede' ? 0.025 : 0.018);
+      critter.group.rotation.z = Math.sin(t * 3.4) * (critter.kind === 'centipede' ? 0.035 : 0.02);
+    } else {
+      critter.group.position.y = critter.homeY + Math.abs(gait) * (critter.kind === 'crab' ? 0.045 : 0.018);
+      critter.group.rotation.z = Math.sin(t * 2.2) * (critter.kind === 'spider' ? 0.025 : 0.035);
+    }
+    critter.group.rotation.y = critter.heading;
     for (const [i, leg] of critter.animatedLegs.entries()) {
-      const phase = t * 7.8 + leg.phase + (i % 2 ? Math.PI : 0);
-      const amount = (critter.kind === 'centipede' ? 0.31 : (critter.kind === 'spider' ? 0.35 : 0.27)) * Math.sin(phase);
+      const phase = t * gaitRate + leg.phase + (i % 2 ? Math.PI : 0);
+      // Clearly alternating steps: legs swing forward/back relative to the animal's local body.
+      const amplitude = critter.kind === 'centipede' ? 0.48 : (critter.kind === 'spider' ? 0.50 : (critter.kind === 'crab' ? 0.43 : 0.40));
+      const amount = amplitude * Math.sin(phase);
       leg.mesh.quaternion.copy(leg.baseQuaternion).multiply(leg.swing.setFromAxisAngle(leg.axis, amount));
     }
     if (critter.group.userData.tailFin) critter.group.userData.tailFin.rotation.y = gait * 0.52;
@@ -2584,9 +2860,13 @@ function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
   updateWeather(dt, now);
   if (now >= nextMinimapDraw) { drawMinimap(); nextMinimapDraw = now + 140; }
-  updateObstacleMotion(now);
+  updateObstacleMotion(dt, now);
+  if(worldMode==='mountain' && weather.kind==='wind') {
+    mountainGustGroup.visible=state.started && !state.paused;
+    for(const gust of mountainGustStreaks){const t=now*0.0014+gust.phase; gust.mesh.position.set(state.x+Math.sin(t)*gust.span+weather.windX*2.4,state.y+gust.height+Math.sin(t*1.7)*0.35,state.z+Math.cos(t*0.83)*gust.span+weather.windZ*2.4); gust.mesh.rotation.y=Math.atan2(weather.windX,weather.windZ);}
+  } else mountainGustGroup.visible=false;
   updateMovableProps(dt);
-  updateAmbientCreatures(now);
+  updateAmbientCreatures(dt, now);
   updateSandPuffs(dt);
   if (state.finale.active) {
     updateFizzFinale(now);
@@ -2609,6 +2889,13 @@ function update(dt, now) {
         if (playerCenter.distanceToSquared(mint.group.position) < 1.8 * 1.8) collectBridgeMint(mint);
       }
       updateBridgePowerups(now);
+    } else if (worldMode === 'mountain') {
+      for(const mint of mountainMints) {
+        if(mint.collected) continue;
+        mint.group.position.y=mint.surfaceY+1.05+Math.sin(now*0.0017+mint.phase)*0.17;
+        mint.group.rotation.y+=dt*0.58;
+        if(playerCenter.distanceToSquared(mint.group.position)<1.8*1.8) collectMountainMint(mint);
+      }
     } else {
       for (const pearl of pearls) {
         if (pearl.collected) continue;

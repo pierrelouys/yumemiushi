@@ -73,13 +73,14 @@ Collect all 25 fizzy pearls to trigger a one-time finale: the player pauses, the
 - Collecting 25 Fizz pearls triggers the dance and Water World transition. The ocean has 30 Seafoam Mint collectibles with their own cyan/white swirl design, score reward, sound, HUD counter, and minimap markers.
 - Plush friends use separate Water World dialogue. Underwater bubbles rise at varied speeds and drift sideways in gentle looping paths.
 
-## Three-stage progression and weather
+## Four-stage progression and weather
 
 - **Meadow:** collect **25 of 30 Fizz pearls** to progress. Wind gusts carry leaves through the grass, sway small plants, play wind ambience, and gently push the character; light rain has visible droplets and its own sound.
 - **Water World:** collect **25 of 30 Seafoam Mints** to progress. The mints have a glowing aqua ring and slightly more generous pickup range. Bubbly currents periodically accelerate the bubbles, play a stronger bubbling sound, and nudge the character sideways.
-- **Bridge World:** collect **30 of 36 Bridge Mints** across stacked, vertical timber bridges wrapped in ivy. Mint-hole powerups temporarily flash the cherry red/yellow and make jumps much higher; the pickups reappear at their original locations after a cooldown.
+- **Bridge World:** collect **30 of 36 Bridge Mints** across stacked, vertical timber bridges wrapped in ivy. The final jump from Sora’s bridge to the summit deck is now a short 0.2-unit edge gap with a 0.8-unit rise. Mint-hole powerups temporarily flash the cherry red/yellow and make jumps much higher; pickups reappear after a cooldown.
+- **World 4 — Blue Ridge Mountain:** collect **35 of 42 Fresh Mints** along a steep switchback hiking route with rock shelves and short ledge jumps. Strong ridge gusts are visible and audible; if the wind catches you on an exposed section, it can push you back down to the mountain base.
 
-The build now checks the Meadow and Water literal collectible lists against their progression thresholds and verifies the Bridge World runtime count guard. It fails rather than shipping a stage with too few progression collectibles. A canvas-textured panoramic sky gradient, time-varying palette, cloud field, and sun/moon placement are shared across the world renderer so dawn, day, sunset and night remain visibly different in every stage; the sea has underwater light rays during daytime when the sky is not overcast.
+The build checks the Meadow and Water literal collectible lists, Bridge and Mountain runtime collectible count guards, the world-four handoff, and the measured final bridge-jump geometry. It fails rather than shipping a stage with too few progression collectibles. A canvas-textured panoramic sky gradient, time-varying palette, cloud field, and sun/moon placement are shared across the world renderer so dawn, day, sunset and night remain visibly different in every stage; the sea has underwater light rays during daytime when the sky is not overcast.
 
 ## October 17, 2026 — Sky contrast, weather forces, and progression guards
 - Reworked the panoramic sky gradient over a wider vertical range because the chase camera sees near the horizon band; dawn/dusk now add warm haze, midday has a richer dark-to-light blue gradient, overcast clouds are stronger, and nighttime blends into deep indigo. Sun/moon/stars and underwater daylight rays remain tied to local time and cloud cover in all stages.
@@ -102,7 +103,7 @@ The build now checks the Meadow and Water literal collectible lists against thei
 - Friend interaction radius is 4.4 world units, balanced between the earlier wide and narrow settings. Friends are solid; if the player overlaps one, a small separation nudge prevents passing through them.
 - If Berry's one-time gift satisfies the Meadow mint goal before the last physical pearl is collected, remaining Meadow pearls are cleared as the Water World transition begins.
 - Sea currents create moving white foam streaks and rings around the character; jumping off the underwater sand produces a brief outward sand puff.
-- The top Bridge World deck has been moved close to the second-highest deck, with a vertical gap of 0.7 units; Sora is on the second-highest bridge. Stage goals remain Meadow 25, Water 25, and Bridge 30, with 20% extra mints available in every world.
+- The top Bridge World deck is positioned just beyond Sora’s deck: there is a 0.2-unit gap between the deck edges and a 0.8-unit rise. The build computes and checks this geometry. Sora stands on the launch deck. All four worlds have about 1.2× the required mints.
 
 
 ### Fullscreen and recent startup fix
@@ -111,8 +112,13 @@ Use the ⛶ button on the welcome screen or in the top-right HUD to enter fullsc
 
 
 ### Latest interaction and exploration tuning
-- Each world carries about 1.2× its clear goal in collectibles: 30 Meadow Fizz (goal 25), 30 Seafoam Mints (goal 25), and 36 Bridge Mints (goal 30). Extra mints are cleared when the next world loads.
+- Each world carries about 1.2× its clear goal in collectibles: 30 Meadow Fizz (goal 25), 30 Seafoam Mints (goal 25), 36 Bridge Mints (goal 30), and 42 Fresh Mints on Blue Ridge Mountain (goal 35). Extra mints are cleared when the next world loads.
 - Water World has a large ribbed, collision-solid scallop shell, 176 moving bubbles, 72 animated surface ripples, and a 170-instance foam field that spreads white streaks throughout an active current.
 - Beetles, centipedes, crabs, crickets, and spiders now animate their legs with alternating gait; fish tails beat while they swim. Critters receive a very small wind drift compared with the character.
 - The friend interaction radius is 4.4 units. Friends collide with the player and separate gently if approached too closely.
-- The uppermost Bridge World deck sits at y=25.75 close to the second-highest deck at y=25.05. Sora is now placed on the second-highest deck, making the intended final jump substantially easier.
+- The uppermost Bridge World deck sits at y=25.85 and z=13.8; Sora’s deck is at y=25.05 and z=19. The build checks the 0.2-unit deck-edge gap and 0.8-unit rise.
+
+
+## World 4 — Blue Ridge Mountain
+
+Blue Ridge is a fictional, blue-coloured mountain biome, unrelated to any real place. Explore its winding hiking trail, climb sloped stone ramps and ledges, hop between shelves, and collect 35 of the 42 Fresh Mints. Gusts have visible streaks and strong audio; exposed sections can blow the character back down to the base. The production build checks the 42-spawn count and 35-mint progression threshold.

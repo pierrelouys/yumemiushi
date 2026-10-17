@@ -123,3 +123,12 @@
 - Added visible gait animation to beetle, centipede, crab, cricket, and spider legs; fish fins now sway while swimming. Critters receive only a tiny wind drift compared with the character’s stronger wind push.
 - Moved the highest bridge closer to the second-highest deck, lowering the height gap to 0.8 units and reducing the horizontal gap. Sora now sits on the second-highest bridge.
 - Updated build invariants to check the new mint cushion and interaction/collision features.
+
+
+## October 17, 2026 — Bridge jump correction, shell redesign, and Blue Ridge Mountain
+- Repositioned the highest bridge beyond the forward edge of Sora’s second-highest bridge: deck-edge gap is 0.2 units and the rise is 0.8 units. The rail clamp now only applies when the player has reached the deck’s elevation, preventing the upper bridge from interfering with takeoff. The build measures and fails if the leap geometry regresses.
+- Rebuilt the sea shell as a low, open scallop with six soft edge lobes, a nacre-like rose/ivory texture, delicate radial fluting, and a small hinge. Removed the large central oval that made it look like a wheel.
+- Reworked critter movement into sustained forward travel aligned with their facing direction. They hold a heading, turn gradually after a while, and steer back inside their small roaming area. Beetles, centipedes, crabs, crickets, and spiders use clearer alternating leg steps; fish continue swimming with tail-fin motion.
+- Boing obstacles remain inert and unmoved by wind; only a player impact applies a temporary knockback impulse to the obstacle.
+- Added World 4, Blue Ridge Mountain: a fictional blue ridge with switchback ramps, rock shelves, fresh mint collectibles, visible windy gusts, and a strong exposed-ridge push that can send the player back to the base. The level has 42 Fresh Mints with a 35-mint goal.
+- Updated build invariants for all four worlds and added geometric assertions for the final bridge hop and Sora’s launch-deck placement.
