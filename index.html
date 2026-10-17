@@ -28,6 +28,7 @@
         <div class="hud-stat friend-stat"><span class="stat-icon">♡</span><span><b id="friend-count">0/8</b><small>friends</small></span></div>
         <div class="score-stat"><span class="stat-label">SPARKLES</span><b id="score-count">00000</b></div>
         <button id="sound-toggle" class="icon-button" type="button" aria-label="Mute music" title="Music on">♫</button>
+        <button id="fullscreen-toggle" class="icon-button fullscreen-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
         <button id="pause-toggle" class="icon-button" type="button" aria-label="Pause game" title="Pause">Ⅱ</button>
       </div>
     </header>
@@ -52,6 +53,7 @@
         <h2 id="finale-title">You found every fizz!</h2>
         <p id="finale-subtitle">A little celebration… then, something is bubbling beneath the meadow.</p>
         <div class="finale-sparkles" aria-hidden="true">✦　✧　·　✧　✦</div>
+        <button id="stage-continue-button" class="primary-button is-hidden stage-continue-button" type="button">Explore this world <span>→</span></button>
       </div>
     </section>
 
@@ -73,7 +75,7 @@
         <button id="start-button" class="primary-button" type="button">Enter the meadow <span>→</span></button>
         <p id="startup-status" class="startup-status" role="status" aria-live="polite"></p>
         <div class="welcome-controls"><span>WASD / arrows · move</span><span>SPACE · jump (hold to hop)</span><span>SPACE near a friend · talk / continue</span></div>
-        <button id="welcome-music-toggle" class="music-note-button" type="button">♫ Music is on · tap to toggle</button>
+        <div class="welcome-secondary-actions"><button id="welcome-fullscreen-toggle" class="text-button welcome-fullscreen-button" type="button">⛶ Full screen</button><button id="welcome-music-toggle" class="music-note-button" type="button">♫ Music is on · tap to toggle</button></div>
       </div>
     </section>
 
@@ -103,6 +105,61 @@
     // Bind the welcome button before the heavy 3D module finishes building the scene.
     // A tap during boot is queued and replayed once the game announces readiness.
     (() => {
+      const fullscreenButtons = [
+        document.getElementById('fullscreen-toggle'),
+        document.getElementById('welcome-fullscreen-toggle')
+      ].filter(Boolean);
+      const app = document.getElementById('app');
+      const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+      const updateFullscreenButtons = () => {
+        const active = fullscreenElement() === app || app.classList.contains('pseudo-fullscreen');
+        fullscreenButtons.forEach(button => {
+          const isWelcomeButton = button.id === 'welcome-fullscreen-toggle';
+          button.textContent = isWelcomeButton
+            ? (active ? '⤡ Exit fullscreen' : '⛶ Full screen')
+            : (active ? '⤡' : '⛶');
+          button.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+          button.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
+          button.classList.toggle('is-fullscreen', active);
+        });
+      };
+      const toggleFullscreen = async () => {
+        const nativeActive = fullscreenElement() === app;
+        const fallbackActive = app.classList.contains('pseudo-fullscreen');
+        try {
+          if (nativeActive) {
+            const exit = document.exitFullscreen || document.webkitExitFullscreen;
+            if (exit) await exit.call(document);
+          } else if (fallbackActive) {
+            app.classList.remove('pseudo-fullscreen');
+            const status = document.getElementById('startup-status');
+            if (status) status.textContent = '';
+          } else {
+            const enter = app.requestFullscreen || app.webkitRequestFullscreen;
+            if (enter) {
+              await enter.call(app);
+            } else {
+              // Best-effort in-app immersive fallback for browsers without the Fullscreen API.
+              app.classList.toggle('pseudo-fullscreen');
+              const status = document.getElementById('startup-status');
+              if (status) status.textContent = app.classList.contains('pseudo-fullscreen')
+                ? 'For browser-level fullscreen, use your browser menu to add this game to your Home Screen.'
+                : '';
+            }
+          }
+        } catch (error) {
+          app.classList.toggle('pseudo-fullscreen', !nativeActive && !fallbackActive);
+          const status = document.getElementById('startup-status');
+          if (status) status.textContent = (!nativeActive && !fallbackActive)
+            ? 'Fullscreen was blocked by the browser; immersive mode is enabled instead.'
+            : '';
+        }
+        updateFullscreenButtons();
+      };
+      fullscreenButtons.forEach(button => button.addEventListener('click', toggleFullscreen));
+      document.addEventListener('fullscreenchange', updateFullscreenButtons);
+      document.addEventListener('webkitfullscreenchange', updateFullscreenButtons);
+      updateFullscreenButtons();
       const button = document.getElementById('start-button');
       const status = document.getElementById('startup-status');
       const labelNode = button && button.firstChild;

@@ -137,3 +137,23 @@ h1 em { color: #e25250; font-style: normal; }
 .pearls-stat > span:nth-child(2) { display: flex; flex-direction: column; line-height: 1.05; }
 .collectible-label { margin-left: 1px; color: #74aaa0 !important; font-size: 6px !important; font-weight: 1000; letter-spacing: .45px; white-space: nowrap; }
 @media (max-width: 650px) { .collectible-label { font-size: 5px !important; letter-spacing: .2px; } }
+
+.stage-continue-button { margin: 22px auto 0; max-width: 320px; color: #155e58; background: linear-gradient(110deg, #79e3d1, #b4f0d9); box-shadow: 0 5px 0 #42b9a8, 0 10px 20px rgba(20,170,150,.18); }
+.stage-continue-button.is-hidden { display: none; }
+
+.finale-overlay.waiting-for-stage-tap { pointer-events: auto; }
+
+/* Fullscreen works on browsers with the Fullscreen API; fallback keeps the game app immersive. */
+#app:fullscreen, #app:-webkit-full-screen, #app.pseudo-fullscreen {
+  width: 100vw; height: 100dvh; min-height: 100%; background: #081c28;
+}
+#app:fullscreen #game-canvas, #app:-webkit-full-screen #game-canvas, #app.pseudo-fullscreen #game-canvas {
+  width: 100vw; height: 100dvh;
+}
+.fullscreen-button { font-size: 21px; line-height: 1; }
+.fullscreen-button.is-fullscreen { background: #d5f7ec; color: #276c60; box-shadow: inset 0 0 0 1px rgba(68,156,137,.22); }
+@media (max-width: 760px) { .fullscreen-button { font-size: 18px; } }
+
+.welcome-secondary-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 7px; }
+.welcome-fullscreen-button { margin: 0; padding: 8px 11px; border: 1px solid rgba(124,190,173,.3); border-radius: 10px; background: rgba(235,251,244,.72); color: #477f73; }
+.welcome-fullscreen-button.is-fullscreen { background: #d5f7ec; color: #276c60; }

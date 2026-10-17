@@ -10,6 +10,10 @@ let worldMode = 'meadow';
 const MEADOW_MINT_REQUIREMENT = 25;
 const WATER_MINT_REQUIREMENT = 25;
 const BRIDGE_MINT_REQUIREMENT = 30;
+const MINT_CUSHION = 1.2;
+const MEADOW_MINT_TOTAL = Math.ceil(MEADOW_MINT_REQUIREMENT * MINT_CUSHION);
+const WATER_MINT_TOTAL = Math.ceil(WATER_MINT_REQUIREMENT * MINT_CUSHION);
+const BRIDGE_MINT_TOTAL = Math.ceil(BRIDGE_MINT_REQUIREMENT * MINT_CUSHION);
 scene.background = new THREE.Color('#d5f8f1');
 scene.fog = new THREE.Fog('#d5f8f1', 105, 245);
 
@@ -570,7 +574,7 @@ const stoneTints = ['#c0c0b1', '#9fa99f', '#b5a998', '#879995', '#d0c6b2', '#a4a
 for (let i = 0; i < stoneCount; i++) {
   let x, z;
   do { x = (rand() * 2 - 1) * 99; z = (rand() * 2 - 1) * 99; } while (Math.hypot(x, z - 12) < 11);
-  const sx = 0.65 + rand() * 1.0, sy = 0.42 + rand() * 0.8, sz = 0.55 + rand() * 1.0;
+  const sx = 0.30 + rand() * 0.43, sy = 0.19 + rand() * 0.27, sz = 0.30 + rand() * 0.43;
   vegetationDummy.position.set(x, sy * 0.47 + 0.012, z);
   vegetationDummy.scale.set(sx, sy, sz);
   vegetationDummy.rotation.set(rand() * 0.24, rand() * Math.PI * 2, rand() * 0.22);
@@ -628,6 +632,7 @@ scene.add(safetyGround);
 // The ground remains continuous behind it, so the edge is visible without any pit or fall.
 const landDecorationObjects = [];
 const landBoundaryObjects = [];
+const movableProps = [];
 const barkMat = new THREE.MeshStandardMaterial({ map: barkTexture, bumpMap: barkBumpTexture, bumpScale: 0.13, roughness: 1, color: '#fff7ee' });
 const barkLightMat = new THREE.MeshStandardMaterial({ map: barkTexture, bumpMap: barkBumpTexture, bumpScale: 0.10, roughness: 1, color: '#d7b28a' });
 const cutWoodMat = new THREE.MeshStandardMaterial({ map: woodEndTexture, bumpMap: woodEndBumpTexture, bumpScale: 0.075, roughness: 1 });
@@ -950,6 +955,18 @@ function addSodaMushroom(x, z, scale, capColor) {
   const dotMat = new THREE.MeshStandardMaterial({ color: '#fff8ed', roughness: 0.78 });
   for (let i = 0; i < 5; i++) { const a = i * Math.PI * 0.4; const dot = new THREE.Mesh(new THREE.SphereGeometry(0.095, 10, 8), dotMat); dot.position.set(Math.cos(a) * 0.67, 2.05 + (i % 2) * 0.12, Math.sin(a) * 0.65); group.add(dot); }
   group.position.set(x, 0, z); group.scale.setScalar(scale); scene.add(group); landDecorationObjects.push(group); windSwayObjects.push(group);
+  movableProps.push({ type: 'mushroom', group, baseX: x, baseZ: z, offsetX: 0, offsetZ: 0, vx: 0, vz: 0, radius: 0.94 * scale, scale, homeY: 0 });
+}
+function addPushableRock(x, z, scale = 1, tint = '#b5b4a4') {
+  const group = new THREE.Group();
+  const rockMaterial = stoneMaterial.clone(); rockMaterial.color.set(tint);
+  const main = new THREE.Mesh(stoneGeometry, rockMaterial);
+  main.position.set(0, 0.40 * scale, 0); main.scale.set(1.25 * scale, 0.88 * scale, 1.14 * scale); main.castShadow = true; main.receiveShadow = true; group.add(main);
+  const side = new THREE.Mesh(stoneGeometry, rockMaterial);
+  side.position.set(0.42 * scale, 0.24 * scale, -0.35 * scale); side.scale.set(0.56 * scale, 0.48 * scale, 0.62 * scale); side.castShadow = true; side.receiveShadow = true; group.add(side);
+  group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  group.position.set(x, 0, z); group.scale.setScalar(1); scene.add(group); landDecorationObjects.push(group);
+  movableProps.push({ type: 'rock', group, baseX: x, baseZ: z, offsetX: 0, offsetZ: 0, vx: 0, vz: 0, radius: 0.86 * scale, scale, mass: 1.8 + scale * 0.9, tint });
 }
 function addBubbleCluster(x, y, z, scale = 1) {
   const group = new THREE.Group();
@@ -969,6 +986,12 @@ for (let i = 0; i < 18; i++) {
   const a = rand() * Math.PI * 2, r = 18 + rand() * 82;
   decorBubbles.push(addBubbleCluster(Math.cos(a) * r, 1.6 + rand() * 7, Math.sin(a) * r, 0.45 + rand() * 1.1));
 }
+// A dozen prominent boulders are real pushable props, unlike the tiny decorative pebbles.
+[
+  [-16, 7, 1.00], [21, 17, 1.14], [36, -25, 1.08], [-41, -33, 1.18],
+  [61, 8, 0.98], [-59, 42, 1.12], [20, 67, 1.05], [-75, -43, 1.15],
+  [73, 46, 1.06], [2, -62, 1.1], [-25, -67, 0.96], [58, -57, 1.13],
+].forEach(([x, z, scale], i) => addPushableRock(x, z, scale, stoneTints[i % stoneTints.length]));
 
 // --- Water World: the secret biome unlocked by collecting every fizzy pearl -----------------------
 // Canvas-generated sand keeps this world self-contained and works on GitHub Pages without extra downloads.
@@ -1015,9 +1038,12 @@ waterFloor.rotation.x = -Math.PI / 2; waterFloor.position.y = 0.004; waterFloor.
 const waterSurface = new THREE.Mesh(new THREE.PlaneGeometry(223.7, 223.7), new THREE.MeshBasicMaterial({ color: '#48d6ed', transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false }));
 waterSurface.rotation.x = -Math.PI / 2; waterSurface.position.y = 34; waterWorld.add(waterSurface);
 const waterRippleMat = new THREE.MeshBasicMaterial({ color: '#a7f8ff', transparent: true, opacity: 0.095, depthWrite: false, side: THREE.DoubleSide });
-for (let i = 0; i < 26; i++) {
+const waterSurfaceRipples = [];
+for (let i = 0; i < 72; i++) {
   const ripple = new THREE.Mesh(new THREE.RingGeometry(0.7 + waterRand() * 0.8, 0.76 + waterRand() * 0.8, 32), waterRippleMat);
-  ripple.rotation.x = -Math.PI / 2; ripple.position.set((waterRand() * 2 - 1) * 94, 33.94, (waterRand() * 2 - 1) * 94); ripple.scale.setScalar(1.8 + waterRand() * 4.5); waterWorld.add(ripple);
+  const x = (waterRand() * 2 - 1) * 101, z = (waterRand() * 2 - 1) * 101, baseScale = 1.8 + waterRand() * 4.5, phase = waterRand() * Math.PI * 2;
+  ripple.rotation.x = -Math.PI / 2; ripple.position.set(x, 33.94, z); ripple.scale.setScalar(baseScale); waterWorld.add(ripple);
+  waterSurfaceRipples.push({ mesh: ripple, x, z, baseScale, phase });
 }
 // Soft shafts of surface light are textured planes with feathered alpha rather than harsh opaque bars.
 const rayCanvas = document.createElement('canvas'); rayCanvas.width = 128; rayCanvas.height = 512;
@@ -1035,6 +1061,33 @@ for (let i = 0; i < 7; i++) {
   const ray = new THREE.Mesh(new THREE.PlaneGeometry(10 + waterRand() * 10, 43 + waterRand() * 13), rayMaterial);
   ray.position.set((waterRand() * 2 - 1) * 72, 17 + waterRand() * 5, (waterRand() * 2 - 1) * 72); ray.rotation.y = waterRand() * Math.PI; waterWorld.add(ray);
 }
+// A large ribbed scallop shell sits on the seabed as a solid landmark, not scenery to pass through.
+const seaShell = new THREE.Group();
+const shellOuter = new THREE.MeshStandardMaterial({ color: '#d78d91', roughness: 0.72, metalness: 0.02, side: THREE.DoubleSide });
+const shellInner = new THREE.MeshStandardMaterial({ color: '#f4c5c5', roughness: 0.48, metalness: 0.03, side: THREE.DoubleSide, emissive: '#6e363e', emissiveIntensity: 0.08 });
+const shellRim = new THREE.MeshStandardMaterial({ color: '#ffe1d0', roughness: 0.42, metalness: 0.04 });
+const shellShape = new THREE.Shape();
+shellShape.moveTo(0, 0.04);
+for (let i = 0; i <= 30; i++) { const a = Math.PI * i / 30; shellShape.lineTo(Math.cos(a) * 2.12, 0.08 + Math.sin(a) * 2.28); }
+shellShape.lineTo(0, 0.04);
+const shellBacking = new THREE.Mesh(new THREE.ExtrudeGeometry(shellShape, { depth: 0.38, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.075, bevelThickness: 0.075 }), shellOuter);
+shellBacking.position.z = -0.2; shellBacking.castShadow = true; shellBacking.receiveShadow = true; seaShell.add(shellBacking);
+const innerShape = new THREE.Shape(); innerShape.moveTo(0, 0.12);
+for (let i = 0; i <= 30; i++) { const a = Math.PI * i / 30; innerShape.lineTo(Math.cos(a) * 1.78, 0.13 + Math.sin(a) * 1.91); }
+innerShape.lineTo(0, 0.12);
+const shellInside = new THREE.Mesh(new THREE.ShapeGeometry(innerShape, 2), shellInner); shellInside.position.z = 0.235; seaShell.add(shellInside);
+for (let i = 1; i < 12; i++) {
+  const a = (i / 12) * Math.PI, end = new THREE.Vector3(Math.cos(a) * 1.92, 0.13 + Math.sin(a) * 2.04, 0.29);
+  const start = new THREE.Vector3(Math.cos(a) * 0.10, 0.12 + Math.sin(a) * 0.10, 0.30);
+  const mid = new THREE.Vector3(Math.cos(a) * 1.04, 0.16 + Math.sin(a) * 1.05, 0.32);
+  const ribCurve = new THREE.CatmullRomCurve3([start, mid, end]);
+  seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(ribCurve, 12, 0.045, 6, false), shellRim));
+}
+const shellLipCurve = new THREE.CatmullRomCurve3(Array.from({ length: 31 }, (_, i) => { const a = Math.PI * i / 30; return new THREE.Vector3(Math.cos(a) * 2.12, 0.08 + Math.sin(a) * 2.28, 0.30); }));
+seaShell.add(new THREE.Mesh(new THREE.TubeGeometry(shellLipCurve, 48, 0.095, 8, false), shellRim));
+seaShell.position.set(38, 0.02, -42); seaShell.rotation.y = -0.20; seaShell.scale.setScalar(1.12); seaShell.castShadow = true; seaShell.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); waterWorld.add(seaShell);
+const seaShellCollider = { x: seaShell.position.x, z: seaShell.position.z, radius: 2.35, height: 2.8 };
+
 // A mottled stone bed and gently bending kelp make the ocean feel inhabited, not like a blue room.
 const waterRockMaterial = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.15, color: '#8ccbd0', roughness: 1 });
 const waterRockCount = 250;
@@ -1091,12 +1144,81 @@ for (let i = 0; i < 22; i++) {
 }
 const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.45, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
 const underwaterBubbles = [];
-for (let i = 0; i < 88; i++) {
+for (let i = 0; i < 176; i++) {
   const bubble = new THREE.Mesh(new THREE.SphereGeometry(0.085 + waterRand() * 0.20, 12, 9), underwaterBubbleMaterial);
   const x = (waterRand() * 2 - 1) * 98, z = (waterRand() * 2 - 1) * 98, baseY = waterRand() * 26;
   bubble.position.set(x, baseY, z); waterWorld.add(bubble); underwaterBubbles.push({ mesh: bubble, baseX: x, baseZ: z, baseY, riseSpeed: 0.00018 + waterRand() * 0.00024, drift: 0.25 + waterRand() * 0.95, phase: waterRand() * Math.PI * 2 });
 }
 const seaCurrent = { active: false, nextAt: performance.now() + 18000, until: 0, x: 0.72, z: -0.42, strength: 2.5, nextBubbleSound: 0 };
+// Directional white foam makes ocean currents readable before they push the player.
+const seaCurrentFx = new THREE.Group(); seaCurrentFx.visible = false; waterWorld.add(seaCurrentFx);
+const seaCurrentFoamMaterial = new THREE.MeshBasicMaterial({ color: '#f5ffff', transparent: true, opacity: 0.78, depthWrite: false, toneMapped: false });
+const seaCurrentFoamGeometry = new THREE.SphereGeometry(1, 10, 7);
+const seaCurrentFoamStreaks = [];
+for (let i = 0; i < 28; i++) {
+  const streak = new THREE.Mesh(seaCurrentFoamGeometry, seaCurrentFoamMaterial);
+  streak.scale.set(0.7, 0.045, 0.13); seaCurrentFx.add(streak); seaCurrentFoamStreaks.push(streak);
+}
+// Broad, world-spanning foam streaks make a bubbly current visible across the whole ocean.
+const globalFoamMaterial = new THREE.MeshBasicMaterial({ color: '#f4ffff', transparent: true, opacity: 0.64, depthWrite: false, toneMapped: false });
+const globalFoamGeometry = new THREE.SphereGeometry(1, 8, 6);
+const GLOBAL_FOAM_COUNT = 170;
+const globalFoamMesh = new THREE.InstancedMesh(globalFoamGeometry, globalFoamMaterial, GLOBAL_FOAM_COUNT);
+globalFoamMesh.frustumCulled = false; globalFoamMesh.visible = false; waterWorld.add(globalFoamMesh);
+const globalFoamRecords = [];
+const globalFoamDummy = new THREE.Object3D();
+for (let i = 0; i < GLOBAL_FOAM_COUNT; i++) {
+  globalFoamRecords.push({ x: (waterRand() * 2 - 1) * 102, z: (waterRand() * 2 - 1) * 102, y: 0.18 + waterRand() * 26, phase: waterRand() * 210, speed: 0.26 + waterRand() * 0.75, length: 0.38 + waterRand() * 0.9, width: 0.065 + waterRand() * 0.065, wave: 0.6 + waterRand() * 2.1 });
+}
+function updateGlobalFoam(now) {
+  const visible = worldMode === 'water' && seaCurrent.active;
+  globalFoamMesh.visible = visible;
+  if (!visible) return;
+  const heading = Math.atan2(seaCurrent.x, seaCurrent.z);
+  for (let i = 0; i < globalFoamRecords.length; i++) {
+    const f = globalFoamRecords[i], travel = (now * 0.001 * f.speed + f.phase) % 204;
+    const wrap = v => ((v + 102) % 204 + 204) % 204 - 102;
+    const x = wrap(f.x + seaCurrent.x * travel - seaCurrent.z * Math.sin(now * 0.0017 + f.phase) * f.wave);
+    const z = wrap(f.z + seaCurrent.z * travel + seaCurrent.x * Math.sin(now * 0.0017 + f.phase) * f.wave);
+    globalFoamDummy.position.set(x, f.y + Math.sin(now * 0.003 + f.phase) * 0.08, z);
+    globalFoamDummy.rotation.set(0, heading + Math.sin(now * 0.002 + f.phase) * 0.25, 0);
+    const pulse = 0.78 + 0.3 * (0.5 + 0.5 * Math.sin(now * 0.006 + f.phase));
+    globalFoamDummy.scale.set(f.length * pulse, f.width * 0.35, f.width);
+    globalFoamDummy.updateMatrix(); globalFoamMesh.setMatrixAt(i, globalFoamDummy.matrix);
+  }
+  globalFoamMesh.instanceMatrix.needsUpdate = true;
+}
+
+const seaCurrentRingGeometry = new THREE.TorusGeometry(1, 0.035, 6, 36);
+const seaCurrentRings = [];
+for (let i = 0; i < 3; i++) {
+  const ring = new THREE.Mesh(seaCurrentRingGeometry, seaCurrentFoamMaterial.clone()); ring.rotation.x = Math.PI / 2;
+  ring.scale.setScalar(1 + i * 0.18); seaCurrentFx.add(ring); seaCurrentRings.push(ring);
+}
+const sandPuffs = [];
+const sandPuffGeometry = new THREE.SphereGeometry(0.16, 9, 6);
+const sandPuffMaterial = new THREE.MeshStandardMaterial({ color: '#d7c7a1', roughness: 1, transparent: true, opacity: 0.64, depthWrite: false });
+function spawnSandPuff() {
+  if (worldMode !== 'water') return;
+  for (let i = 0; i < 8; i++) {
+    const material = sandPuffMaterial.clone();
+    const mesh = new THREE.Mesh(sandPuffGeometry, material);
+    const angle = (i / 8) * Math.PI * 2 + rand() * 0.22;
+    const radius = 0.18 + rand() * 0.32;
+    mesh.position.set(state.x + Math.cos(angle) * radius, 0.08 + rand() * 0.05, state.z + Math.sin(angle) * radius);
+    mesh.scale.setScalar(0.45 + rand() * 0.6); waterWorld.add(mesh);
+    sandPuffs.push({ mesh, material, vx: Math.cos(angle) * (0.45 + rand() * 0.65), vz: Math.sin(angle) * (0.45 + rand() * 0.65), vy: 0.35 + rand() * 0.55, life: 0.42 + rand() * 0.22, maxLife: 0.64 });
+  }
+}
+function updateSandPuffs(dt) {
+  for (const puff of sandPuffs.slice()) {
+    puff.life -= dt; puff.mesh.position.x += puff.vx * dt; puff.mesh.position.z += puff.vz * dt;
+    puff.mesh.position.y += puff.vy * dt; puff.vy -= 0.48 * dt;
+    const k = Math.max(0, puff.life / puff.maxLife); puff.material.opacity = 0.64 * k;
+    puff.mesh.scale.multiplyScalar(1 + dt * 1.8);
+    if (puff.life <= 0) { waterWorld.remove(puff.mesh); puff.material.dispose(); sandPuffs.splice(sandPuffs.indexOf(puff), 1); }
+  }
+}
 const underwaterSnowPositions = new Float32Array(560 * 3);
 for (let i = 0; i < underwaterSnowPositions.length; i += 3) {
   underwaterSnowPositions[i] = (waterRand() * 2 - 1) * 105;
@@ -1118,8 +1240,9 @@ const seaMintSpots = [
   [-84,-25],[-56,-22],[-32,-41],[29,-35],[58,-26],[82,-12],
   [-78,12],[-48,29],[-17,42],[15,22],[45,39],[73,32],
   [-65,66],[-28,73],[18,67],[57,72],[-4,-5],[3,52],[35,-57],
+  [-94,48],[93,47],[-91,-51],[88,67],[67,-91],
 ];
-if (seaMintSpots.length !== WATER_MINT_REQUIREMENT) throw new Error(`Water World progression requires exactly ${WATER_MINT_REQUIREMENT} sea mints; found ${seaMintSpots.length}`);
+if (seaMintSpots.length !== WATER_MINT_TOTAL) throw new Error(`Water World should contain ${WATER_MINT_TOTAL} sea mints (20% cushion); found ${seaMintSpots.length}`);
 for (let i = 0; i < seaMintSpots.length; i++) {
   const [x, z] = seaMintSpots[i];
   const group = new THREE.Group();
@@ -1143,7 +1266,7 @@ for (let i = 0; i < seaMintSpots.length; i++) {
   group.position.set(x, 1.92 + (i % 3) * 0.12, z); waterWorld.add(group);
   waterMints.push({ group, x, z, baseY: group.position.y, phase: waterRand() * Math.PI * 2, collected: false });
 }
-if (waterMints.length !== WATER_MINT_REQUIREMENT) throw new Error(`Water World created ${waterMints.length} collectibles; ${WATER_MINT_REQUIREMENT} are required for progression.`);
+if (waterMints.length !== WATER_MINT_TOTAL || waterMints.length < WATER_MINT_REQUIREMENT) throw new Error(`Water World created ${waterMints.length} collectibles; ${WATER_MINT_TOTAL} expected and ${WATER_MINT_REQUIREMENT} required.`);
 
 // --- Bridge World: an ivy-draped, stacked timber maze with vertical progression ------------------
 const bridgeWorld = new THREE.Group(); bridgeWorld.visible = false; scene.add(bridgeWorld);
@@ -1216,7 +1339,7 @@ const bridgeSegmentSpecs = [
   { x: -15, z: -11, y: 18.25, length: 23, width: 3.8, rotation: 0.88 },
   { x: -17, z: 7, y: 21.65, length: 21, width: 3.8, rotation: 0.88 },
   { x: 0, z: 19, y: 25.05, length: 26, width: 4.2, rotation: 0.25 },
-  { x: 16, z: 13, y: 28.45, length: 22, width: 3.8, rotation: -0.88 },
+  { x: 7, z: 12, y: 25.85, length: 25, width: 4.2, rotation: -0.12 },
 ];
 bridgeSegmentSpecs.forEach(addBridgeSegment);
 function localBridgePoint(platform, lx, lz = 0) {
@@ -1249,15 +1372,15 @@ const bridgeMints = [];
 const bridgeMintMaterial = new THREE.MeshStandardMaterial({ color: '#b9f0a1', map: platformMintTexture, bumpMap: platformMintBump, bumpScale: 0.08, roughness: 0.56, metalness: 0.04, emissive: '#376b37', emissiveIntensity: 0.13 });
 const bridgeMintRimMaterial = new THREE.MeshStandardMaterial({ color: '#f1ffd8', roughness: 0.46, metalness: 0.05 });
 const bridgeMintSpots = [];
-bridgePlatforms.forEach((platform, pi) => {
-  const locals = pi < 6 ? [-platform.length * 0.34, -platform.length * 0.10, platform.length * 0.14, platform.length * 0.36] : [-platform.length * 0.28, 0, platform.length * 0.28];
+bridgePlatforms.forEach((platform) => {
+  // Four per deck (36 total), spaced along each bridge so the 30-mint goal has a 20% cushion.
+  const locals = [-platform.length * 0.36, -platform.length * 0.12, platform.length * 0.12, platform.length * 0.36];
   locals.forEach((lx, j) => {
-    if (bridgeMintSpots.length >= BRIDGE_MINT_REQUIREMENT) return;
     const point = localBridgePoint(platform, lx, j % 2 ? 0.32 : -0.28);
     bridgeMintSpots.push([point.x, point.z, platform.y]);
   });
 });
-if (bridgeMintSpots.length !== BRIDGE_MINT_REQUIREMENT) throw new Error(`Bridge World requires exactly ${BRIDGE_MINT_REQUIREMENT} progression mints; found ${bridgeMintSpots.length}`);
+if (bridgeMintSpots.length !== BRIDGE_MINT_TOTAL || bridgeMintSpots.length < BRIDGE_MINT_REQUIREMENT) throw new Error(`Bridge World needs ${BRIDGE_MINT_TOTAL} collectible mints and at least ${BRIDGE_MINT_REQUIREMENT} for progression; found ${bridgeMintSpots.length}`);
 for (let i = 0; i < bridgeMintSpots.length; i++) {
   const [x, z, surfaceY] = bridgeMintSpots[i];
   const group = new THREE.Group();
@@ -1271,7 +1394,7 @@ for (let i = 0; i < bridgeMintSpots.length; i++) {
   group.position.set(x, surfaceY + 1.12, z); bridgeWorld.add(group);
   bridgeMints.push({ group, x, z, surfaceY, phase: rand() * Math.PI * 2, collected: false });
 }
-if (bridgeMints.length !== BRIDGE_MINT_REQUIREMENT) throw new Error(`Bridge World created ${bridgeMints.length} collectibles; ${BRIDGE_MINT_REQUIREMENT} are required for progression.`);
+if (bridgeMints.length !== BRIDGE_MINT_TOTAL || bridgeMints.length < BRIDGE_MINT_REQUIREMENT) throw new Error(`Bridge World created ${bridgeMints.length}; expected ${BRIDGE_MINT_TOTAL}, required ${BRIDGE_MINT_REQUIREMENT}.`);
 
 // Per-tier mint-hole powerups: boost jumps and flash the player's cherry red/yellow.
 const bridgePowerups = [];
@@ -1311,7 +1434,7 @@ const friendSpecs = [
   { name: 'Momo', x: 18, z: -14, color: '#e889b4', tail: '#b85c6f', accessory: 'cherry', eyes: '#75423e', lines: ['Oh! You have a cherry, too. Twinsies!','I collect bubbles that look like tiny planets. That pearly one over there is my favourite.','If you follow the flower trail, it loops all the way back here. No rush, though.'], seaLines: ['Cherry twinsies, but underwater! My stem keeps tickling the bubbles.','I heard that sea mints taste like the first cold sip of soda. Is that true?','If the current carries you east, there is a garden of pink coral.'] },
   { name: 'Purin', x: -20, z: -22, color: '#eebf67', tail: '#a46d45', accessory: 'cloud', eyes: '#744d3c', lines: ['Welcome to the meadow! I was just practicing my very slow dance.','One, two… wiggle. One, two… wiggle. Perfect, right?','You make this place feel extra fizzy. Here, take a little sparkle.'], seaLines: ['My cloud hat is getting very good at catching tiny bubbles.','Under the water, everything sounds like a lullaby wrapped in a blanket.','Try drifting past the tall kelp. It sways along when you wiggle.'] },
   { name: 'Lulu', x: -37, z: 13, color: '#a88cdf', tail: '#7a66b4', accessory: 'bow', eyes: '#44335c', lines: ['I picked this bow from a cloud. It is made of exceptionally soft sky.','Sometimes I float up high just to see the whole meadow. You can do that, too!','I think the cherry on your head is a very good hat.'], seaLines: ['My ribbon is floating straight up. I feel like a very fancy jellyfish.','The blue light down here makes every pearl look like a little star.','I am collecting names for these tiny fish-shaped shadows. Any ideas?'] },
-  { name: 'Berry', x: 40, z: 27, color: '#f0dfc8', tail: '#c68c9b', accessory: 'strawberry', eyes: '#91515a', lines: ['A tiny secret: the strawberries here are mostly made of felt.','They are still very nice to look at, and they never go mushy.','I saved a bubble for you. I hope it sparkles in just the right way.'], seaLines: ['I found a tiny sea strawberry, but a shrimp borrowed it as a hat.','The sea mints are cooler blue than the meadow fizz. They tingle a little!','When I close my eyes, the bubble trails sound like soft rain.'] },
+  { name: 'Berry', x: 40, z: 27, color: '#f0dfc8', tail: '#c68c9b', accessory: 'strawberry', eyes: '#91515a', savedMintGift: true, lines: ['A tiny secret: the strawberries here are mostly made of felt.','They are still very nice to look at, and they never go mushy.','I saved a mint for you! Take it—one fizz closer to your goal.'], seaLines: ['I found a tiny sea strawberry, but a shrimp borrowed it as a hat.','The sea mints are cooler blue than the meadow fizz. They tingle a little!','When I close my eyes, the bubble trails sound like soft rain.'] },
   { name: 'Mugi', x: 2, z: -44, color: '#9b6844', tail: '#65442f', accessory: 'candy', eyes: '#3e3029', lines: ['This patch of meadow is perfect for a nap. Very fluffy ground.','I tried counting the bubbles, but they kept drifting away and I forgot my place.','Maybe you will have better luck! Or we can just enjoy them.'], seaLines: ['My wrapped candy stays dry in the water. I have no idea how.','There are soft sandy ripples over there. I am trying not to fall asleep on them.','A mint that tastes like sea breeze? That sounds like a very good snack.'] },
   { name: 'Sora', x: -53, z: -39, color: '#76b9e8', tail: '#4d83b7', accessory: 'flower', eyes: '#22485b', lines: ['The sky is so minty today. Or is the meadow making the sky look minty?','When you float, you can see all the little paths the flowers make.','I hope you find a new favourite place today.'], seaLines: ['My flower smells like clean rain, even though we are under the sea.','Look up through the water surface. The sunlight is dancing!','I think the tiny bubbles are trying to tell us a story in Morse code.'] },
   { name: 'Mizu', x: 61, z: -32, color: '#e98566', tail: '#bd604d', accessory: 'wrappedCandy', eyes: '#173b35', lines: ['I am guarding this very important flower. It is important because it is cute.','You can wander anywhere around here. The meadow goes on and on.','Let us meet here again after your next little adventure.'], seaLines: ['I traded a shiny shell for this wrapped candy. Best trade ever.','Sometimes the current nudges me around like a very polite shopping cart.','There are sea mints nearby. The minty ones are my favourite flavour.'] },
@@ -1340,6 +1463,104 @@ const bridgeFriendLines = {
 };
 for (const friend of friends) friend.bridgeLines = bridgeFriendLines[friend.name] || ['The bridges are taller than they look.','Ivy makes everything feel a little more magical.','See you on the next bridge!'];
 
+// Little biome wildlife adds life without becoming a friend, enemy, or interaction target.
+const ambientCreatureRecords = [];
+const meadowCritterWorld = new THREE.Group(); scene.add(meadowCritterWorld); landDecorationObjects.push(meadowCritterWorld);
+const waterCritterWorld = new THREE.Group(); waterWorld.add(waterCritterWorld);
+const bridgeCritterWorld = new THREE.Group(); bridgeWorld.add(bridgeCritterWorld);
+const critterMaterialCache = new Map();
+function critterMat(color, roughness = 0.94) {
+  const key = `${color}/${roughness}`;
+  if (!critterMaterialCache.has(key)) critterMaterialCache.set(key, new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 }));
+  return critterMaterialCache.get(key);
+}
+function critterMesh(parent, geometry, material, position, scale = [1,1,1]) {
+  const mesh = new THREE.Mesh(geometry, material); mesh.position.set(...position); mesh.scale.set(...scale);
+  mesh.castShadow = false; mesh.receiveShadow = false; parent.add(mesh); return mesh;
+}
+function critterSegment(parent, a, b, radius, material, animateLeg = false) {
+  const av = new THREE.Vector3(...a), bv = new THREE.Vector3(...b), dir = bv.clone().sub(av);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.75, radius, dir.length(), 5), material);
+  mesh.position.copy(av.add(bv).multiplyScalar(0.5)); mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.normalize());
+  mesh.userData.gaitLeg = animateLeg; mesh.castShadow = false; parent.add(mesh); return mesh;
+}
+function makeAmbientCreature(kind, parent, x, z, y = 0, color = '#a66d45', index = 0) {
+  const group = new THREE.Group(); parent.add(group);
+  const bodyMat = critterMat(color, 0.87), dark = critterMat('#463c35'), legMat = critterMat('#5b574c'), eyeMat = critterMat('#141e22', 0.25), cream = critterMat('#fff0d5');
+  const sphere = new THREE.SphereGeometry(1, 10, 8);
+  if (kind === 'beetle') {
+    critterMesh(group, sphere, dark, [0,0.18,0], [0.32,0.17,0.43]);
+    critterMesh(group, new THREE.SphereGeometry(1,12,9), bodyMat, [0,0.27,-0.04], [0.34,0.16,0.38]);
+    critterMesh(group, sphere, bodyMat, [0,0.20,0.39], [0.19,0.15,0.19]);
+    for (const side of [-1,1]) {
+      critterMesh(group, sphere, eyeMat, [side*0.12,0.25,0.53], [0.035,0.04,0.035]);
+      for (let leg = 0; leg < 3; leg++) {
+        const zz = 0.23 - leg*0.23;
+        critterSegment(group,[side*0.18,0.14,zz],[side*0.39,0.06,zz+(leg-1)*0.12],0.025,legMat,true);
+      }
+    }
+  } else if (kind === 'centipede') {
+    for (let i=0;i<8;i++) {
+      const zz = 0.44 - i*0.13, rr = 0.105 - i*0.004;
+      critterMesh(group, sphere, bodyMat, [Math.sin(i*0.45)*0.035,0.13,zz], [rr,rr,rr*1.05]);
+      for (const side of [-1,1]) critterSegment(group,[side*rr*0.65,0.12,zz],[side*(rr+0.13),0.045,zz-0.035],0.012,legMat,true);
+    }
+    critterMesh(group,sphere,eyeMat,[-0.035,0.17,0.55],[0.025,0.03,0.025]);
+    critterMesh(group,sphere,eyeMat,[0.035,0.17,0.55],[0.025,0.03,0.025]);
+  } else if (kind === 'fish') {
+    critterMesh(group, sphere, bodyMat, [0,0,0], [0.46,0.25,0.22]);
+    const tail = critterMesh(group,new THREE.ConeGeometry(0.2,0.33,5),bodyMat,[-0.47,0,0],[1,1,0.8]); tail.rotation.z = -Math.PI/2; group.userData.tailFin = tail;
+    critterMesh(group,new THREE.ConeGeometry(0.12,0.25,5),cream,[0.02,0.25,0],[0.65,0.65,0.7]).rotation.z=0.7;
+    critterMesh(group,sphere,eyeMat,[0.27,0.075,0.17],[0.045,0.045,0.035]);
+  } else if (kind === 'crab') {
+    critterMesh(group,sphere,bodyMat,[0,0.18,0],[0.4,0.19,0.31]);
+    for (const side of [-1,1]) {
+      critterMesh(group,sphere,bodyMat,[side*0.25,0.39,0.12],[0.09,0.12,0.085]);
+      critterMesh(group,sphere,eyeMat,[side*0.27,0.42,0.18],[0.03,0.035,0.03]);
+      for(let leg=0;leg<3;leg++) critterSegment(group,[side*0.25,0.15,-0.12+leg*0.12],[side*(0.47+leg*0.03),0.07,-0.19+leg*0.19],0.025,bodyMat,true);
+      critterSegment(group,[side*0.31,0.23,0.13],[side*0.48,0.3,0.26],0.045,bodyMat);
+      critterMesh(group,sphere,bodyMat,[side*0.51,0.31,0.28],[0.09,0.07,0.08]);
+    }
+  } else if (kind === 'cricket') {
+    critterMesh(group,sphere,bodyMat,[0,0.17,-0.03],[0.18,0.13,0.37]);
+    critterMesh(group,sphere,bodyMat,[0,0.19,0.37],[0.14,0.12,0.13]);
+    for(const side of [-1,1]) {
+      for(let leg=0;leg<3;leg++) critterSegment(group,[side*0.10,0.13,0.16-leg*0.16],[side*(leg===2?0.42:0.29),leg===2?0.22:0.045,0.23-leg*0.22],0.025,legMat,true);
+      critterSegment(group,[side*0.07,0.24,0.43],[side*0.15,0.53,0.68],0.012,dark);
+    }
+  } else if (kind === 'spider') {
+    critterMesh(group,sphere,bodyMat,[0,0.18,-0.14],[0.22,0.16,0.27]);
+    critterMesh(group,sphere,dark,[0,0.17,0.17],[0.16,0.13,0.16]);
+    for(const side of [-1,1]) for(let leg=0;leg<4;leg++) {
+      const zz = 0.2-leg*0.15;
+      critterSegment(group,[side*0.12,0.18,zz],[side*(0.34+(leg%2)*0.06),0.11,zz+(leg-1.5)*0.12],0.018,dark,true);
+      critterSegment(group,[side*(0.34+(leg%2)*0.06),0.11,zz+(leg-1.5)*0.12],[side*0.42,0.035,zz+(leg-1.5)*0.16],0.014,legMat,true);
+    }
+  }
+  group.position.set(x,y,z);
+  const animatedLegs = [];
+  group.traverse(child => { if (child.userData?.gaitLeg) animatedLegs.push({ mesh: child, baseQuaternion: child.quaternion.clone(), phase: animatedLegs.length * Math.PI * 0.78, axis: new THREE.Vector3(0, 0, 1), swing: new THREE.Quaternion() }); });
+  const creatureMotion = {
+    fish: { speed: 0.76, wander: 8.5 }, crab: { speed: 1.02, wander: 5.0 },
+    beetle: { speed: 0.92, wander: 4.6 }, centipede: { speed: 0.84, wander: 5.2 },
+    cricket: { speed: 1.22, wander: 2.8 }, spider: { speed: 0.74, wander: 0.68 },
+  }[kind] || { speed: 0.72, wander: 2.5 };
+  ambientCreatureRecords.push({ kind, group, homeX:x, homeY:y, homeZ:z, phase:rand()*Math.PI*2, speed: creatureMotion.speed, wander: creatureMotion.wander, index, animatedLegs });
+  return group;
+}
+// Meadow: beetles and centipedes trundle through the grass, safely ignoring the player.
+for (let i=0;i<5;i++) makeAmbientCreature('beetle', meadowCritterWorld, -68+i*28, -28+(i%2)*17, 0, ['#995f3a','#477d49','#9b7048','#6c8d4e','#7c5e4c'][i], i);
+for (let i=0;i<4;i++) makeAmbientCreature('centipede', meadowCritterWorld, -52+i*32, 43-(i%2)*19, 0, ['#d07b55','#7b9e50','#be7156','#8a9560'][i], i);
+// Water: small fish swim in loose loops and crabs shuffle along the seabed.
+for (let i=0;i<5;i++) makeAmbientCreature('fish', waterCritterWorld, -58+i*27, -44+(i%2)*54, 1.8+(i%3)*0.6, ['#f4a5a8','#e5d986','#8bd8db','#b8a3ea','#f5c18a'][i], i);
+for (let i=0;i<4;i++) makeAmbientCreature('crab', waterCritterWorld, -55+i*36, 58-(i%2)*26, 0.02, ['#ef8b82','#d77868','#e6b06e','#d87581'][i], i);
+// Bridge World: green crickets in the grass and tiny spiders exploring the timber tiers.
+for (let i=0;i<3;i++) makeAmbientCreature('cricket', bridgeCritterWorld, -45+i*38, -38+(i%2)*12, 0.02, ['#628949','#829e4c','#527a45'][i], i);
+for (let i=0;i<3;i++) {
+  const p = bridgePlatforms[[0,4,7][i]], pt = localBridgePoint(p, (i-1)*5, 0);
+  makeAmbientCreature('spider', bridgeCritterWorld, pt.x, pt.z, p.y + 0.02, ['#4c3d36','#655447','#483d3a'][i], i);
+}
+
 // Collectible fizzy pearls lead to little discoveries, but are scattered in an open, explorable space.
 const pearlMaterial = [
   new THREE.MeshPhysicalMaterial({ color: '#fff1cd', emissive: '#fff1cd', emissiveIntensity: 0.12, roughness: 0.18, clearcoat: 1 }),
@@ -1352,8 +1573,9 @@ const pearlSpots = [
   [26, 38, 2.0], [48, 17, 1.4], [50, -15, 3.6], [45, -52, 1.7], [5, -55, 2.9],
   [-15, -47, 1.7], [-45, -52, 2.8], [-61, -25, 1.6], [-56, 8, 3.1], [-37, 48, 1.7],
   [-5, 55, 2.7], [20, 55, 1.5], [56, 50, 3.0], [70, 9, 1.8], [-68, -70, 2.6],
+  [-84, 23, 2.2], [39, -43, 2.55], [3, -82, 2.15], [82, 58, 2.4], [-22, 79, 1.9],
 ];
-if (pearlSpots.length !== MEADOW_MINT_REQUIREMENT) throw new Error(`Meadow progression requires exactly ${MEADOW_MINT_REQUIREMENT} fizz pearls; found ${pearlSpots.length}`);
+if (pearlSpots.length !== MEADOW_MINT_TOTAL) throw new Error(`Meadow should contain ${MEADOW_MINT_TOTAL} field Fizz pearls (20% cushion); found ${pearlSpots.length}`);
 const pearls = pearlSpots.map(([x, z, y], i) => {
   const g = new THREE.Group();
   const orb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 16), pearlMaterial[i % pearlMaterial.length]); orb.scale.set(1, 1.12, 0.9); orb.castShadow = true; g.add(orb);
@@ -1361,7 +1583,7 @@ const pearls = pearlSpots.map(([x, z, y], i) => {
   g.position.set(x, y, z); scene.add(g);
   return { group: g, x, z, y, phase: rand() * Math.PI * 2, collected: false };
 });
-if (pearls.length !== MEADOW_MINT_REQUIREMENT) throw new Error(`Meadow created ${pearls.length} collectibles; ${MEADOW_MINT_REQUIREMENT} are required for progression.`);
+if (pearls.length !== MEADOW_MINT_TOTAL || pearls.length < MEADOW_MINT_REQUIREMENT) throw new Error(`Meadow created ${pearls.length}; expected ${MEADOW_MINT_TOTAL}, required ${MEADOW_MINT_REQUIREMENT}.`);
 
 // --- Silly solid hazards: wobble-bumps and sprinkle jelly bars -------------------------------
 const obstacles = [];
@@ -1419,8 +1641,9 @@ function addJellyBar(x, z, rotation = 0, scale = 1, color = '#ffa8b8') {
 // --- State, controls, music --------------------------------------------------------------------
 const state = {
   started: false, paused: false, x: 0, y: 0, z: 12,
-  vx: 0, vy: 0, vz: 0, yaw: Math.PI,
+  vx: 0, vy: 0, vz: 0, yaw: Math.PI, knockbackUntil: 0,
   pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
+  mintGiftClaimed: false, stageAwaitingTap: false,
   highJumpUntil: 0, highJumpWasActive: false, bridgeStageComplete: false,
   activeFriend: null, activeDialogueLines: null, toastUntil: 0, bob: 0,
   finale: { active: false, targetWorld: 'water', startAt: 0, baseYaw: Math.PI, camOffset: new THREE.Vector3(7.8, 7.2, 12.4), fovStart: 55, enteredWater: false, overlayShown: false },
@@ -1589,10 +1812,11 @@ function updateWeather(dt, now) {
     if (!seaCurrent.active && now >= seaCurrent.nextAt) {
       seaCurrent.active = true; seaCurrent.until = now + 6800 + rand() * 4200;
       const angle = rand() * Math.PI * 2; seaCurrent.x = Math.cos(angle); seaCurrent.z = Math.sin(angle); seaCurrent.strength = 3.8 + rand() * 1.6;
+      seaCurrentFx.visible = true;
       seaCurrent.nextBubbleSound = now;
       toast('A bubbly current is swirling through the sea!');
     } else if (seaCurrent.active && now >= seaCurrent.until) {
-      seaCurrent.active = false; seaCurrent.nextAt = now + 19000 + rand() * 24000; seaCurrent.strength = 0;
+      seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrentFoamMaterial.opacity = 0.78; seaCurrent.nextAt = now + 19000 + rand() * 24000; seaCurrent.strength = 0;
       toast('The sea has settled again.');
     }
     if (seaCurrent.active && now >= seaCurrent.nextBubbleSound) {
@@ -1670,7 +1894,7 @@ const particles = [];
 function updateHUD() {
   const stage = worldMode === 'water' ? 'water' : (worldMode === 'bridge' ? 'bridge' : 'meadow');
   const count = stage === 'water' ? state.waterMintsCollected : (stage === 'bridge' ? state.bridgeMintsCollected : state.pearls);
-  const limit = stage === 'water' ? WATER_MINT_REQUIREMENT : (stage === 'bridge' ? BRIDGE_MINT_REQUIREMENT : MEADOW_MINT_REQUIREMENT);
+  const limit = stage === 'water' ? waterMints.length : (stage === 'bridge' ? bridgeMints.length : (pearls.length + 1));
   $('#pearl-count').textContent = String(count);
   const pearlLimit = $('#pearl-limit'); if (pearlLimit) pearlLimit.textContent = `/ ${limit}`;
   const pearlIcon = document.querySelector('.pearls-stat .stat-icon'); if (pearlIcon) pearlIcon.textContent = stage === 'water' ? '❋' : (stage === 'bridge' ? '◉' : '✧');
@@ -1718,6 +1942,7 @@ function drawMinimap() {
   ctx.restore();
 }
 
+const FRIEND_TALK_RANGE = 4.4; // Comfortable middle ground: close enough to chat without triggering from far away.
 function nearestFriend() {
   let nearest = null, dist = Infinity;
   for (const f of friends) {
@@ -1725,7 +1950,7 @@ function nearestFriend() {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (d < dist) { dist = d; nearest = f; }
   }
-  return dist <= 6.2 ? { friend: nearest, distance: dist } : null;
+  return dist <= FRIEND_TALK_RANGE ? { friend: nearest, distance: dist } : null;
 }
 function refreshPrompt() {
   const near = nearestFriend();
@@ -1737,16 +1962,51 @@ function refreshPrompt() {
     prompt.classList.add('is-hidden');
   }
 }
+function separateFromFriend(friend, gentle = false) {
+  if (Math.abs(state.y - (friend.worldFloorY || 0)) > 1.45) return;
+  let dx = state.x - friend.slug.position.x, dz = state.z - friend.slug.position.z;
+  let dist = Math.hypot(dx, dz);
+  const minimum = 2.15;
+  if (dist >= minimum) return;
+  if (dist < 0.001) { dx = Math.cos(state.yaw + Math.PI); dz = Math.sin(state.yaw + Math.PI); dist = 1; }
+  const nx = dx / dist, nz = dz / dist, push = minimum - dist + 0.035;
+  state.x += nx * push; state.z += nz * push;
+  const into = state.vx * nx + state.vz * nz;
+  if (into < 0) { state.vx -= nx * into * (gentle ? 0.82 : 1); state.vz -= nz * into * (gentle ? 0.82 : 1); }
+  state.x = THREE.MathUtils.clamp(state.x, -103, 103); state.z = THREE.MathUtils.clamp(state.z, -103, 103);
+}
+function resolveFriendCollisions() {
+  for (const friend of friends) separateFromFriend(friend, false);
+}
+function resolveWaterShellCollision() {
+  if (worldMode !== 'water' || state.y > seaShellCollider.height) return;
+  let dx = state.x - seaShellCollider.x, dz = state.z - seaShellCollider.z;
+  let dist = Math.hypot(dx, dz);
+  const minimum = SLUG_DIMS.rz * 0.88 + seaShellCollider.radius;
+  if (dist >= minimum) return;
+  if (dist < 0.001) { dx = 1; dz = 0; dist = 1; }
+  const nx = dx / dist, nz = dz / dist;
+  state.x += nx * (minimum - dist + 0.03); state.z += nz * (minimum - dist + 0.03);
+  const into = state.vx * nx + state.vz * nz;
+  if (into < 0) { state.vx -= nx * into; state.vz -= nz * into; }
+  state.x = THREE.MathUtils.clamp(state.x, -103, 103); state.z = THREE.MathUtils.clamp(state.z, -103, 103);
+}
+
 function talkToNearest() {
   if (!state.started || state.paused || state.activeFriend) return;
   const near = nearestFriend();
   if (!near) { toast('Come a little closer to say hello.'); return; }
   const f = near.friend;
+  // If the player is already overlapping a pal, make a little room before the chat pose.
+  separateFromFriend(f, true);
   const lines = worldMode === 'water' && Array.isArray(f.seaLines) ? f.seaLines : (worldMode === 'bridge' && Array.isArray(f.bridgeLines) ? f.bridgeLines : f.lines);
   state.activeDialogueLines = lines;
   state.activeFriend = f;
   state.y = f.worldFloorY || 0; state.vy = 0;
   clearHeld();
+  // Turn the player toward the pal before dialogue starts, and let the pal turn back too.
+  state.yaw = Math.atan2(f.x - state.x, f.z - state.z);
+  player.rotation.y = state.yaw;
   f.slug.rotation.y = Math.atan2(state.x - f.x, state.z - f.z);
   f.dialogueIndex = 0;
   $('#dialogue-name').textContent = f.name;
@@ -1768,12 +2028,22 @@ function closeDialogue() {
   $('#dialogue-card').classList.add('is-hidden');
   refreshPrompt();
 }
+function claimSavedMintGift(friend) {
+  if (!friend.savedMintGift || worldMode !== 'meadow' || state.mintGiftClaimed) return false;
+  state.mintGiftClaimed = true; state.pearls++; state.score += 25;
+  sparkle(new THREE.Vector3(friend.x, (friend.worldFloorY || 0) + 2.2, friend.z), 18);
+  sfx(1040, 0.12, 'sine', 0.13); setTimeout(() => sfx(1380, 0.14, 'triangle', 0.11), 65);
+  updateHUD(); toast('Berry gave you a saved Fizz Mint!');
+  if (state.pearls >= MEADOW_MINT_REQUIREMENT) { closeDialogue(); startFizzFinale(); return true; }
+  return false;
+}
 function advanceDialogue() {
   const f = state.activeFriend, lines = state.activeDialogueLines; if (!f || !lines) return;
   f.dialogueIndex++;
   if (f.dialogueIndex >= lines.length) { closeDialogue(); return; }
   $('#dialogue-text').textContent = lines[f.dialogueIndex];
   $('#dialogue-next').textContent = f.dialogueIndex === lines.length - 1 ? 'Say goodbye  ✦' : 'Keep chatting  →';
+  if (f.dialogueIndex === 2 && claimSavedMintGift(f)) return;
   sfx(530 + f.dialogueIndex * 100, 0.09, 'sine', 0.07);
 }
 function jumpOrInteract() {
@@ -1792,6 +2062,7 @@ $('#dialogue-close').addEventListener('click', closeDialogue);
 function startStageFinale(targetWorld = 'water') {
   if (state.finale.active || (worldMode === 'meadow' && targetWorld !== 'water') || (worldMode === 'water' && targetWorld === 'water') || (worldMode === 'bridge' && targetWorld !== 'complete')) return;
   state.finale.active = true; state.finale.targetWorld = targetWorld; state.finale.startAt = performance.now(); state.finale.baseYaw = state.yaw;
+  state.stageAwaitingTap = false; $('#stage-continue-button').classList.add('is-hidden'); $('#finale-overlay').classList.remove('waiting-for-stage-tap');
   state.finale.camOffset.set(camera.position.x - state.x, camera.position.y - state.y, camera.position.z - state.z);
   state.finale.danceY = targetWorld === 'complete' ? state.y : 0;
   state.finale.cameraYaw = Math.atan2(2.65, 6.9);
@@ -1810,6 +2081,10 @@ function startFizzFinale() { startStageFinale('water'); }
 function enterWaterWorld(now) {
   if (worldMode === 'water') return;
   worldMode = 'water'; state.finale.enteredWater = true;
+  // Berry's gift can satisfy the 25-Fizz goal while one field pearl remains; clear every leftover before changing worlds.
+  for (const pearl of pearls) { pearl.collected = true; pearl.group.visible = false; }
+  state.stageAwaitingTap = true; state.paused = true;
+  const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Dive into the Water World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
   state.friendsMet = 0;
   for (const friend of friends) friend.met = false;
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
@@ -1832,7 +2107,7 @@ function enterWaterWorld(now) {
     friend.bobble.group.visible = true;
     friend.bobble.group.traverse(obj => { if (obj.isMesh && obj.material?.color) obj.material.color.set('#aaf5ff'); });
   }
-  seaCurrent.active = false; seaCurrent.nextAt = now + 14000 + rand() * 9000;
+  seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.nextAt = now + 14000 + rand() * 9000;
   setWeather('clear', now); applyLocalTime(); updateWeatherReadout();
   const hint = document.querySelector('.world-hint span:last-child'); if (hint) hint.textContent = 'The Water World · follow bubbles and explore';
   const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'WATER WORLD MAP';
@@ -1844,14 +2119,20 @@ function enterWaterWorld(now) {
 function enterBridgeWorld(now) {
   if (worldMode === 'bridge') return;
   worldMode = 'bridge'; state.finale.enteredWater = true;
-  state.x = 0; state.y = 0; state.z = 12; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI;
+  for (const mint of waterMints) { mint.collected = true; mint.group.visible = false; }
+  state.stageAwaitingTap = true; state.paused = true;
+  // Clear all remaining Seafoam Mints once this stage is complete and the next one loads.
+  for (const mint of waterMints) { mint.collected = true; mint.group.visible = false; }
+  const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Explore Bridge World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
+  const spawnPlatform = bridgePlatforms[0];
+  state.x = spawnPlatform.x; state.y = spawnPlatform.y; state.z = spawnPlatform.z; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI;
   state.highJumpUntil = 0; state.highJumpWasActive = false; state.bridgeMintsCollected = 0; state.bridgeStageComplete = false;
   if (player.userData.cherryMesh) player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor);
   state.friendsMet = 0;
   const meadowObjects = [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects];
   for (const obj of meadowObjects) obj.visible = false;
   for (const obstacle of obstacles) obstacle.group.visible = false;
-  waterWorld.visible = false; bridgeWorld.visible = true; seaCurrent.active = false; seaCurrent.strength = 0;
+  waterWorld.visible = false; bridgeWorld.visible = true; seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.strength = 0;
   skyDome.visible = true; sun.visible = true; moonLight.visible = true;
   if (moonMesh) moonMesh.visible = false;
   for (const item of decorBubbles) item.group.visible = false;
@@ -1859,14 +2140,23 @@ function enterBridgeWorld(now) {
     friend.met = false;
     friend.bobble.group.visible = false;
   }
-  // Place friends along successive tiers, including a couple of bridges stacked above lower decks.
-  const friendPlatforms = [0, 1, 2, 3, 4, 5, 6, 7];
-  const friendOffsets = [-8, 1, 3, -5, 5, -2, 4, -7];
+  // Spread five pals across the timber tiers and move three onto the surrounding grass.
+  const bridgePlacements = [
+    { platform: 0, lx: -8, lz: 0 },
+    { ground: true, x: 27, z: 34 },
+    { platform: 2, lx: 1, lz: 0 },
+    { ground: true, x: -34, z: -29 },
+    { platform: 4, lx: -4, lz: 0 },
+    { platform: 7, lx: 2, lz: 0 },
+    { ground: true, x: 34, z: -34 },
+    { platform: 8, lx: -4, lz: 0 },
+  ];
   friends.forEach((friend, i) => {
-    const platform = bridgePlatforms[friendPlatforms[i]];
-    const pt = localBridgePoint(platform, friendOffsets[i], (i % 2 ? 0.7 : -0.6));
-    friend.x = pt.x; friend.z = pt.z; friend.worldFloorY = platform.y;
+    const place = bridgePlacements[i];
+    if (place.ground) { friend.x = place.x; friend.z = place.z; friend.worldFloorY = 0; }
+    else { const platform = bridgePlatforms[place.platform]; const pt = localBridgePoint(platform, place.lx, place.lz); friend.x = pt.x; friend.z = pt.z; friend.worldFloorY = platform.y; }
     friend.slug.position.set(friend.x, friend.worldFloorY, friend.z);
+    friend.slug.rotation.y = Math.atan2(state.x - friend.x, state.z - friend.z);
     friend.nameSprite.position.set(friend.x, friend.worldFloorY + 4.05, friend.z);
     friend.bobble.y = friend.worldFloorY + 3.5;
     friend.bobble.group.position.set(friend.x + 1.4, friend.bobble.y, friend.z);
@@ -1905,13 +2195,14 @@ function updateFizzFinale(now) {
     const pullback = smooth((elapsed - 4.25) / 1.45);
     camOffset.lerp(f.camOffset, pullback);
   }
-  player.position.set(state.x, f.danceY + danceBounce, state.z);
+  const sceneDanceY = f.enteredWater ? state.y : f.danceY;
+  player.position.set(state.x, sceneDanceY + danceBounce, state.z);
   for (const feeler of player.userData.feelers) {
     const wobble = Math.sin(elapsed * 8 + feeler.side) * 0.08;
     feeler.mesh.rotation.z = feeler.baseRotZ + wobble; feeler.tip.rotation.z = feeler.baseRotZ + wobble;
   }
-  camera.position.set(state.x + camOffset.x, f.danceY + danceBounce + camOffset.y, state.z + camOffset.z);
-  camera.up.set(0, 1, 0); camera.lookAt(state.x, f.danceY + danceBounce + 1.32, state.z - 0.2);
+  camera.position.set(state.x + camOffset.x, sceneDanceY + danceBounce + camOffset.y, state.z + camOffset.z);
+  camera.up.set(0, 1, 0); camera.lookAt(state.x, sceneDanceY + danceBounce + 1.32, state.z - 0.2);
   const fovBlend = elapsed < 3.25 ? smooth(elapsed / 2.45) : (elapsed > 4.25 ? 1 - smooth((elapsed - 4.25) / 1.45) : 1);
   camera.fov = THREE.MathUtils.lerp(f.fovStart, 39, fovBlend); camera.updateProjectionMatrix();
   if (elapsed >= 3.02 && !f.overlayShown) {
@@ -1922,13 +2213,14 @@ function updateFizzFinale(now) {
     else if (f.targetWorld === 'bridge') enterBridgeWorld(now);
     else if (f.targetWorld === 'complete') { state.bridgeStageComplete = true; f.enteredWater = true; $('#finale-kicker').textContent = 'BRIDGE GARDEN COMPLETE'; $('#finale-title').textContent = 'Every mint, every bridge!'; $('#finale-subtitle').textContent = 'The whole treetop garden is yours to wander.'; $('#finale-overlay').classList.add('is-visible'); sfx(880, 0.25, 'triangle', 0.14); }
   }
-  if (elapsed >= 4.3 && f.targetWorld !== 'complete') $('#finale-overlay').classList.remove('is-visible');
+  if (elapsed >= 4.3 && f.targetWorld !== 'complete' && !state.stageAwaitingTap) $('#finale-overlay').classList.remove('is-visible');
   if (elapsed >= 5.78) {
-    if (f.targetWorld === 'complete') $('#finale-overlay').classList.remove('is-visible');
+    if (f.targetWorld === 'complete' || !state.stageAwaitingTap) $('#finale-overlay').classList.remove('is-visible');
     f.active = false; player.position.set(state.x, state.y, state.z); player.rotation.y = f.baseYaw; player.rotation.x = player.rotation.z = 0; player.scale.setScalar(1);
     camera.position.set(state.x + 7.8, state.y + 6.2, state.z + 12.4); camera.lookAt(state.x, state.y + 2.5, state.z - 1.4);
     camera.fov = window.innerWidth < 650 ? 59 : 55; camera.updateProjectionMatrix();
     touchControls.classList.remove('finale-lock'); $('#pause-toggle').disabled = false;
+    if (state.stageAwaitingTap) $('#stage-continue-button').classList.remove('is-hidden');
     clearHeld(); refreshPrompt(); drawMinimap();
   }
 }
@@ -2077,9 +2369,9 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
       const nlx = lx/(rx*rx), nlz = lz/(rz*rz), nlen = Math.hypot(nlx,nlz)||1;
       const nx = (nlx*c + nlz*sn)/nlen, nz = (-nlx*sn + nlz*c)/nlen;
       if (now > o.bonkAt) {
-        state.vx = nx*5.2; state.vz = nz*5.2;
-        if (state.y < 0.14) state.vy = Math.max(state.vy, 3.1);
-        o.bonkAt = now + 700; flashObstacle(o, now); toast('Boing!'); playBoing();
+        state.vx = nx * 18.5; state.vz = nz * 18.5; state.knockbackUntil = now + 460;
+        if (state.y < 0.14) state.vy = Math.max(state.vy, 4.6);
+        o.bonkAt = now + 700; flashObstacle(o, now); toast('BOI-OI-OING!'); playBoing();
       }
     } else {
       const candidateX = state.x, candidateZ = state.z;
@@ -2095,9 +2387,9 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
         let bx = attemptDX, bz = attemptDZ;
         if (Math.hypot(bx, bz) < 0.01) { bx = oldX - o.x; bz = oldZ - o.z; }
         const backLen = Math.hypot(bx, bz) || 1;
-        state.vx = -(bx / backLen) * 5.8; state.vz = -(bz / backLen) * 5.8;
-        if (state.y < 0.14) state.vy = Math.max(state.vy, 2.8);
-        o.bonkAt = now + 850; flashObstacle(o, now); toast('Boing! Try hopping over it.'); playBoing();
+        state.vx = -(bx / backLen) * 16.5; state.vz = -(bz / backLen) * 16.5; state.knockbackUntil = now + 420;
+        if (state.y < 0.14) state.vy = Math.max(state.vy, 3.9);
+        o.bonkAt = now + 850; flashObstacle(o, now); toast('BIG BOING! Try hopping over it.'); playBoing();
       }
     }
     state.x = THREE.MathUtils.clamp(state.x,-103,103);
@@ -2105,6 +2397,52 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
   }
 }
 
+function updateMovableProps(dt) {
+  if (worldMode !== 'meadow') return;
+  const spring = Math.exp(-dt * 4.8), rockDrag = Math.exp(-dt * 1.15);
+  for (const prop of movableProps) {
+    if (prop.type === 'rock') {
+      prop.vx *= rockDrag; prop.vz *= rockDrag;
+      prop.offsetX += prop.vx * dt; prop.offsetZ += prop.vz * dt;
+    } else {
+      // Mushrooms flex aside under pressure, but a spring pulls them back to their rooted home.
+      prop.vx += -prop.offsetX * 7.5 * dt; prop.vz += -prop.offsetZ * 7.5 * dt;
+      prop.vx *= spring; prop.vz *= spring;
+      prop.offsetX += prop.vx * dt; prop.offsetZ += prop.vz * dt;
+      const maxOffset = 0.72 * prop.scale, offsetLen = Math.hypot(prop.offsetX, prop.offsetZ);
+      if (offsetLen > maxOffset) { prop.offsetX *= maxOffset/offsetLen; prop.offsetZ *= maxOffset/offsetLen; }
+    }
+    prop.group.position.set(prop.baseX + prop.offsetX, prop.homeY || 0, prop.baseZ + prop.offsetZ);
+    if (prop.type === 'mushroom') prop.group.rotation.z = THREE.MathUtils.clamp(prop.offsetX * 0.18, -0.18, 0.18);
+    else prop.group.rotation.z = THREE.MathUtils.clamp(prop.vx * 0.06, -0.2, 0.2);
+  }
+}
+function resolveMovablePropCollisions(oldX, oldZ) {
+  if (worldMode !== 'meadow') return;
+  for (const prop of movableProps) {
+    const dx = state.x - prop.group.position.x, dz = state.z - prop.group.position.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    const charRadius = 0.91;
+    const minimum = charRadius + prop.radius;
+    if (dist >= minimum || state.y > (prop.type === 'mushroom' ? 0.65 : 1.6)) continue;
+    const nx = dx/dist, nz = dz/dist;
+    const penetration = minimum-dist;
+    const approach = Math.max(0, -(state.vx*nx + state.vz*nz));
+    // Separate the plush just enough to avoid sinking into the prop, while its mass takes the push.
+    state.x += nx * penetration * 0.82; state.z += nz * penetration * 0.82;
+    if (prop.type === 'rock') {
+      const effort = Math.min(1.8, 0.5 + approach * 0.16) / prop.mass;
+      prop.vx -= nx * effort * 4.2; prop.vz -= nz * effort * 4.2;
+      const into = state.vx*nx + state.vz*nz;
+      if (into < 0) { state.vx -= nx*into*0.92; state.vz -= nz*into*0.92; }
+    } else {
+      const effort = 0.9 + approach * 0.18;
+      prop.vx -= nx * effort; prop.vz -= nz * effort;
+      const into = state.vx*nx + state.vz*nz;
+      if (into < 0) { state.vx -= nx*into*0.62; state.vz -= nz*into*0.62; }
+    }
+  }
+}
 function pointOnBridgePlatform(platform, x, z, padding = 0) {
   const dx = x - platform.x, dz = z - platform.z;
   const c = Math.cos(platform.rotation), sn = Math.sin(platform.rotation);
@@ -2119,6 +2457,26 @@ function findBridgeLanding(oldY, newY, x, z) {
     if (oldY >= platform.y - 0.035 && newY <= platform.y + 0.02 && (!landing || platform.y > landing.y)) landing = platform;
   }
   return landing;
+}
+function constrainToBridgeRails() {
+  if (worldMode !== 'bridge') return;
+  for (const platform of bridgePlatforms) {
+    if (Math.abs(state.y - platform.y) > 1.25) continue;
+    const dx = state.x - platform.x, dz = state.z - platform.z;
+    const c = Math.cos(platform.rotation), sn = Math.sin(platform.rotation);
+    const lx = dx*c - dz*sn, lz = dx*sn + dz*c;
+    if (Math.abs(lx) > platform.length/2 - 0.55 || Math.abs(lz) > platform.width/2 + 0.35) continue;
+    const safeHalf = Math.max(0.72, platform.width/2 - 0.98);
+    if (Math.abs(lz) <= safeHalf) continue;
+    const clamped = Math.sign(lz || 1) * safeHalf;
+    state.x = platform.x + lx*c + clamped*sn;
+    state.z = platform.z - lx*sn + clamped*c;
+    const vxLocal = state.vx*c - state.vz*sn;
+    const vzLocal = state.vx*sn + state.vz*c;
+    const correctedVZ = Math.abs(vzLocal) > 0 ? 0 : vzLocal;
+    state.vx = vxLocal*c + correctedVZ*sn;
+    state.vz = -vxLocal*sn + correctedVZ*c;
+  }
 }
 function bridgeSupportBelow(x, z, y) {
   let support = 0;
@@ -2141,11 +2499,19 @@ function updatePlayer(dt, now) {
   const targetVX = ix / planarLen * speed + pushX;
   const targetVZ = iz / planarLen * speed + pushZ;
   const smooth = 1 - Math.exp(-dt * 8.8);
-  state.vx += (targetVX - state.vx) * smooth;
-  state.vz += (targetVZ - state.vz) * smooth;
+  if (now < state.knockbackUntil) {
+    // Let the springy recoil play out briefly instead of steering cancelling it on the next frame.
+    const recoilDrag = Math.exp(-dt * 0.85); state.vx *= recoilDrag; state.vz *= recoilDrag;
+  } else {
+    state.vx += (targetVX - state.vx) * smooth;
+    state.vz += (targetVZ - state.vz) * smooth;
+  }
   const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : 0;
   const jumpPower = now < state.highJumpUntil ? 14.6 : 7.5;
-  if (held.jump && state.y <= supportY + 0.025 && state.vy <= 0) state.vy = jumpPower;
+  if (held.jump && state.y <= supportY + 0.025 && state.vy <= 0) {
+    state.vy = jumpPower;
+    if (worldMode === 'water') spawnSandPuff();
+  }
   state.vy -= 19.2 * dt;
   state.y += state.vy * dt;
   if (worldMode === 'bridge') {
@@ -2157,7 +2523,11 @@ function updatePlayer(dt, now) {
   if (state.y >= ceiling) { state.y = ceiling; if (state.vy > 0) state.vy = 0; }
   state.x = THREE.MathUtils.clamp(state.x + state.vx * dt, -103, 103);
   state.z = THREE.MathUtils.clamp(state.z + state.vz * dt, -103, 103);
+  constrainToBridgeRails();
   resolveObstacleCollisions(oldX, oldZ, now);
+  resolveMovablePropCollisions(oldX, oldZ);
+  resolveFriendCollisions();
+  resolveWaterShellCollision();
   if (Math.abs(state.x) >= 102.9) state.vx = 0;
   if (Math.abs(state.z) >= 102.9) state.vz = 0;
   if (Math.hypot(state.vx, state.vz) > 0.45) {
@@ -2180,11 +2550,44 @@ function updatePlayer(dt, now) {
   camera.up.set(0, 1, 0);
   camera.lookAt(state.x, state.y + 2.5, state.z - 1.4);
 }
+function updateAmbientCreatures(now) {
+  for (const critter of ambientCreatureRecords) {
+    const t = now * 0.001 * critter.speed + critter.phase;
+    const dx = Math.cos(t) * critter.wander, dz = Math.sin(t * 0.83) * critter.wander * 0.68;
+    const tinyWind = worldMode !== 'water' && weather.kind === 'wind' ? 0.14 : 0; // Critters shelter low to the ground; the player gets the stronger gust.
+    critter.group.position.x = critter.homeX + dx + weather.windX * tinyWind * Math.sin(t * 0.34);
+    critter.group.position.z = critter.homeZ + dz + weather.windZ * tinyWind * Math.sin(t * 0.29 + 1.2);
+    if (critter.kind === 'fish') {
+      critter.group.position.y = critter.homeY + Math.sin(t * 1.7) * 0.72;
+      critter.group.rotation.z = Math.sin(t * 2.5) * 0.10; // Gentle swimming roll.
+    } else if (critter.kind === 'cricket') {
+      critter.group.position.y = critter.homeY + Math.pow(Math.max(0, Math.sin(t * 3.1)), 5) * 0.42;
+      critter.group.rotation.z = Math.sin(t * 3.2) * 0.075;
+    } else if (critter.kind === 'beetle' || critter.kind === 'centipede') {
+      critter.group.position.y = critter.homeY + Math.abs(Math.sin(t * 3.8)) * (critter.kind === 'centipede' ? 0.055 : 0.04);
+      critter.group.rotation.z = Math.sin(t * 3.4) * (critter.kind === 'centipede' ? 0.07 : 0.045);
+    } else {
+      critter.group.position.y = critter.homeY + Math.abs(Math.sin(t * 2.6)) * (critter.kind === 'crab' ? 0.09 : 0.035);
+      critter.group.rotation.z = Math.sin(t * 2.2) * (critter.kind === 'spider' ? 0.045 : 0.06);
+    }
+    critter.group.rotation.y = Math.atan2(dx * critter.speed, dz * critter.speed);
+    const gait = Math.sin(t * (critter.kind === 'crab' || critter.kind === 'spider' ? 10.5 : 8.4));
+    for (const [i, leg] of critter.animatedLegs.entries()) {
+      const phase = t * 7.8 + leg.phase + (i % 2 ? Math.PI : 0);
+      const amount = (critter.kind === 'centipede' ? 0.31 : (critter.kind === 'spider' ? 0.35 : 0.27)) * Math.sin(phase);
+      leg.mesh.quaternion.copy(leg.baseQuaternion).multiply(leg.swing.setFromAxisAngle(leg.axis, amount));
+    }
+    if (critter.group.userData.tailFin) critter.group.userData.tailFin.rotation.y = gait * 0.52;
+  }
+}
 function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
   updateWeather(dt, now);
   if (now >= nextMinimapDraw) { drawMinimap(); nextMinimapDraw = now + 140; }
   updateObstacleMotion(now);
+  updateMovableProps(dt);
+  updateAmbientCreatures(now);
+  updateSandPuffs(dt);
   if (state.finale.active) {
     updateFizzFinale(now);
   } else if (state.started && !state.paused && !state.activeFriend) {
@@ -2230,6 +2633,33 @@ function update(dt, now) {
   });
   for (const item of decorBubbles) { item.group.position.y = item.y + Math.sin(now * 0.0011 + item.phase) * 0.24; item.group.visible = worldMode === 'water'; }
   if (worldMode === 'water') {
+    for (const ripple of waterSurfaceRipples) {
+      const pulse = 0.92 + 0.12 * Math.sin(now * 0.0014 + ripple.phase);
+      ripple.mesh.scale.setScalar(ripple.baseScale * pulse);
+      ripple.mesh.position.x = ripple.x + Math.sin(now * 0.00038 + ripple.phase) * 1.6;
+      ripple.mesh.position.z = ripple.z + Math.cos(now * 0.00031 + ripple.phase) * 1.4;
+      ripple.mesh.material.opacity = 0.055 + 0.045 * (0.5 + 0.5 * Math.sin(now * 0.001 + ripple.phase));
+    }
+    seaCurrentFoamMaterial.opacity = 0.78;
+    seaCurrentFx.visible = seaCurrent.active;
+    updateGlobalFoam(now);
+    if (seaCurrent.active) {
+      const dirX = seaCurrent.x, dirZ = seaCurrent.z, sideX = -dirZ, sideZ = dirX;
+      const heading = Math.atan2(dirX, dirZ);
+      seaCurrentFoamStreaks.forEach((streak, i) => {
+        const along = ((i % 8) - 3.5) * 1.05 + Math.sin(now * 0.0021 + i * 1.7) * 0.32;
+        const across = Math.sin(now * 0.0019 + i * 2.13) * (1.0 + (i % 3) * 0.42);
+        streak.position.set(state.x + dirX * along + sideX * across, 0.24 + (i % 5) * 0.38 + Math.sin(now * 0.0025 + i) * 0.09, state.z + dirZ * along + sideZ * across);
+        streak.rotation.y = heading + Math.sin(now * 0.0018 + i) * 0.24;
+        const flicker = 0.75 + 0.38 * (0.5 + 0.5 * Math.sin(now * 0.006 + i * 1.91));
+        streak.scale.set((0.5 + (i % 4) * 0.14) * flicker, 0.035 + (i % 3) * 0.012, 0.095 + (i % 2) * 0.035);
+      });
+      seaCurrentRings.forEach((ring, i) => {
+        const pulse = ((now * 0.001 + i / 3) % 1);
+        ring.position.set(state.x + dirX * 2.2, 0.12 + i * 0.12, state.z + dirZ * 2.2);
+        ring.scale.setScalar(0.7 + pulse * 1.0); ring.material.opacity = 0.58 * (1 - pulse);
+      });
+    }
     for (const kelp of underwaterKelp) kelp.group.rotation.z = Math.sin(now * 0.0008 + kelp.phase) * 0.045;
     for (const bubble of underwaterBubbles) {
       const surge = seaCurrent.active ? 5.5 : 1.0;
@@ -2284,6 +2714,13 @@ function resumeGame() {
   if (audioContext?.state === 'suspended') audioContext.resume();
 }
 $('#resume-button').addEventListener('click', resumeGame);
+$('#stage-continue-button').addEventListener('click', () => {
+  if (!state.stageAwaitingTap) return;
+  state.stageAwaitingTap = false; state.paused = false;
+  $('#finale-overlay').classList.remove('is-visible', 'waiting-for-stage-tap'); $('#stage-continue-button').classList.add('is-hidden');
+  touchControls.classList.remove('finale-lock'); clearHeld(); refreshPrompt(); updateHUD(); drawMinimap();
+  sfx(660, 0.12, 'triangle', 0.12);
+});
 $('#restart-button').addEventListener('click', () => { closeDialogue(); state.x = 0; state.y = 0; state.z = 12; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI; state.started = true; state.paused = false; $('#pause-screen').classList.add('is-hidden'); clearHeld(); });
 $('#pause-toggle').addEventListener('click', () => state.paused ? resumeGame() : pauseGame());
 $('#sound-toggle').addEventListener('click', () => setSound(!state.soundOn));

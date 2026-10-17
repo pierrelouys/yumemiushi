@@ -83,3 +83,43 @@
 
 - Fixed `applyLocalTime()` crashing because `mixColor()` referenced an undefined `dayColor` helper. It now constructs THREE.Color instances directly for the sky, fog, ground, hemisphere-light, and sun palettes before interpolation.
 - Rebuilt `dist/` so the deployable site contains the same fix as the source.
+
+
+## 2026-10-17 — World interaction update
+- Player turns toward friends on conversation start; friends face back.
+- Berry awards one Fizz Mint when the saved-mint dialogue line is reached. Meadow has 26 possible mint rewards while the goal remains 25.
+- Stage transitions now finish on a welcome panel and wait for a tap before movement resumes.
+- Added pushable, momentum-driven boulders and springy rooted mushrooms to the meadow.
+- Increased boing knockback for bump creatures and jelly bars.
+- Added harmless ambient beetles and centipedes in the meadow, fish and crabs in Water World, and crickets and spiders in Bridge World.
+- Bridge World now spawns the character at the centre of the first bridge, has more spread-out friends (including three on the grass), and constrains movement at side rails.
+- Added build-time feature guards for dialogue rewards, movable props, rail collision, critter animation, and tappable stage-arrival UI.
+
+## October 17, 2026 — Stronger boings, roaming creatures, and current/sand effects
+- Increased bumpy creature knockback to a strong outward launch and bar knockback to a stronger reverse launch. A short recoil window prevents movement input from cancelling the knockback immediately.
+- Made beetles, centipedes, fish, crabs, crickets, and spiders roam wider loops, with faster species-specific movement and extra swimming, hopping, scuttling, and body motion.
+- Halved friend talk activation range from 6.2 to 3.1 world units to reduce accidental conversations while jumping.
+- When the Berry gift lets the player meet the Meadow goal early, remaining physical Fizz pearls are hidden and marked cleared before Water World starts.
+- Added a visible, player-centred trail of white foam streaks and expanding rings whenever the Water World current activates.
+- Added small sand puffs around the sea floor each time the character jumps from the bottom.
+- Lowered the top bridge deck to y=26.25, only 1.2 units above the second-highest deck, making the final normal jump reachable without changing the mint requirements.
+- Extended production build regression checks for talk range, knockback, clearing leftover Fizz, current visuals, sand puffs, autonomous wildlife, and top bridge height. Progression remains 25 Meadow Fizz (plus Berry's bonus gift), 25 Seafoam Mints, and 30 Bridge Mints.
+
+
+## Runtime fix — underwater particles and fullscreen (2026-10-17)
+
+- Fixed a startup crash by constructing the underwater particle buffer with `new Float32Array(...)`.
+- Added a fullscreen toggle to the HUD for desktop and mobile browsers. It uses the browser Fullscreen API (including WebKit-prefixed support) and updates its icon/accessibility label when fullscreen changes.
+- Added an immersive app fallback for browsers that do not expose the Fullscreen API. The handler lives in the early inline page bootstrap, so it remains available even if the 3D module fails before startup.
+- Added responsive fullscreen button styling.
+
+
+## October 17, 2026 — Mint cushion, sea foam, and tangible friends
+- Set friend speech activation to 4.4 world units, between the previous wide and narrow settings.
+- Added physical friend collision across stages and a gentle separation nudge before conversations if the player overlaps a friend.
+- Added a large ribbed scallop shell to the Water World and a solid collision footprint so the player cannot pass through it.
+- Increased all world mint placements to 1.2× the progression goal: Meadow 30 Fizz for a 25 goal, Water 30 Seafoam Mints for a 25 goal, and Bridge 36 Bridge Mints for a 30 goal. Remaining mints are hidden/cleared as the next stage loads.
+- Spread 170 animated white foam streaks across the whole Water World during currents, increased surface ripples to 72, and expanded the ambient bubble field to 176 bubbles.
+- Added visible gait animation to beetle, centipede, crab, cricket, and spider legs; fish fins now sway while swimming. Critters receive only a tiny wind drift compared with the character’s stronger wind push.
+- Moved the highest bridge closer to the second-highest deck, lowering the height gap to 0.8 units and reducing the horizontal gap. Sora now sits on the second-highest bridge.
+- Updated build invariants to check the new mint cushion and interaction/collision features.
