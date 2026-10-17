@@ -10,7 +10,7 @@ The current build uses a locally generated panoramic day/night sky texture with 
 ### Desktop
 
 - **W / A / S / D** or **arrow keys** — move freely around the meadow
-- **Space** — jump; keep holding to hop repeatedly on landing
+- **Space** — jump; keep holding to hop repeatedly on landing. In Water World, tap Space again while airborne for a double jump, then once more for a triple jump
 - **Space near a friend** — start or continue their conversation
 - **E / Enter** — alternate conversation control; **M** toggles music; **P / Esc** pauses or resumes
 
@@ -19,7 +19,7 @@ Gravity pulls the plush back to the continuous ground automatically. There is no
 ### Phone / tablet
 
 - Drag the circular **MOVE** stick to move in any direction on the ground plane.
-- Press and hold the single **JUMP / TALK** button to keep hopping. When a friend is close, tap that same button to talk or continue their dialogue.
+- Press and hold the single **JUMP / TALK** button to keep hopping. In Water World, press it again mid-air for a double jump and once more for a triple jump. When a friend is close, tap that same button to talk or continue their dialogue.
 - Tap the music note to mute or restore the soundtrack.
 
 ## What to explore
@@ -122,3 +122,26 @@ Use the ⛶ button on the welcome screen or in the top-right HUD to enter fullsc
 ## World 4 — Blue Ridge Mountain
 
 Blue Ridge is a fictional, blue-coloured mountain biome, unrelated to any real place. Explore its winding hiking trail, climb sloped stone ramps and ledges, hop between shelves, and collect 35 of the 42 Fresh Mints. Gusts have visible streaks and strong audio; exposed sections can blow the character back down to the base. The production build checks the 42-spawn count and 35-mint progression threshold.
+
+## Latest mobile and progression polish
+
+- Touch movement and jump/talk controls remain visible in landscape orientation on coarse-pointer **or no-hover** touch devices, including wide phones with viewports over 760 CSS pixels.
+- Every world-entry card explicitly states the progression goal and total available mints: 25/30 Meadow Fizz, 25/30 Seafoam Mints, 30/36 Bridge Mints, and 35/42 Fresh Mints on Blue Ridge Mountain.
+- Four oversized meadow trampolines start a sequence of automatic little bounces when landed on. Press jump while bouncing to launch a massive leap.
+- The local-time HUD shows the Japanese month/day format (for example `10月7日`). Weather clouds fade in/out over time rather than appearing all at once.
+- Mobile rendering retains texture/model detail and full-resolution soft shadows. Cloud puffs are merged into one mesh per cluster to reduce draw calls, and the 1536px shadow map refreshes at 40 Hz to lower GPU load while the game still renders at display frame rate.
+
+## Water World double/triple jumps and custom stage music
+
+- In Water World, press Jump again while airborne to perform a **double jump**, then press once more for a **triple jump**. Each extra jump emits a little burst of bubbles beneath the plush. The sea has 520 moving, touchable bubbles; touching one pops it with a bubbly sound and it reappears elsewhere after a short pause.
+- You can replace the generated fallback soundtrack with your own MP3s. Put these files in `public/assets/` before running `npm run build`:
+  - `stage01.mp3` — Fizzy Meadow
+  - `stage02.mp3` — Water World
+  - `stage03.mp3` — Bridge World
+  - `stage04.mp3` — Blue Ridge Mountain
+
+  The build copies `public/assets/` into `dist/assets/`, and the game selects the matching track whenever a world loads. The files are intentionally not included in this project because you will supply your own music. If a track is missing, returns a load error, or cannot provide media data after the load timeout, the original synthesized soundtrack is used as a fallback. If you add MP3s after building, run `npm run build` again before deploying.
+
+## After the fourth world: replay mode
+
+Clearing Blue Ridge Mountain opens the ending screen, promises that more worlds are on the way, and offers a selector for all four stages. Replay mode doubles each mint pool: 60 Meadow Fizz, 60 Seafoam Mints, 72 Bridge Mints, and 84 Fresh Mints. Every selected replay starts its mint counter at zero. Advancing to the next world during a replay reactivates that world's expanded mint pool and resets the counter there as well.

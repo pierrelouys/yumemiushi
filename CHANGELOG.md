@@ -132,3 +132,20 @@
 - Boing obstacles remain inert and unmoved by wind; only a player impact applies a temporary knockback impulse to the obstacle.
 - Added World 4, Blue Ridge Mountain: a fictional blue ridge with switchback ramps, rock shelves, fresh mint collectibles, visible windy gusts, and a strong exposed-ridge push that can send the player back to the base. The level has 42 Fresh Mints with a 35-mint goal.
 - Updated build invariants for all four worlds and added geometric assertions for the final bridge hop and Sora’s launch-deck placement.
+
+## 2026-10-17 — Landscape controls, stage goals, trampolines, and mobile rendering
+- Made touch controls persist in landscape on coarse-pointer and no-hover devices, including phones whose CSS viewport is wider than 760px; the control sizes adapt to short landscape viewports.
+- Made each stage-arrival card explicitly state the required mint count and available cushion: Meadow 25/30 Fizz, Water 25/30 Seafoam, Bridge 30/36, and Blue Ridge 35/42 Fresh Mints.
+- Added four oversized plush trampolines to Meadow. Landing on one starts automatic small bounces; pressing Jump while charged launches a huge leap with a higher temporary ceiling.
+- Added the local Japanese month/day display in the time HUD (for example, `10月7日`).
+- Smoothed weather evolution by moving cloud cover toward targets continuously; cluster opacity and sun dimming update gradually during cloud gathering, showers, and clearing.
+- Reduced mobile draw-call overhead without reducing texture resolution or model detail: each cloud cluster's puffs are merged into one geometry/draw call. Soft shadow resolution is retained while the shadow map refreshes at 40 Hz instead of every rendered frame.
+- Added build invariants for landscape controls, every stage's progression instructions, all four trampolines, large-jump behavior, gradual weather, merged cloud meshes, and the shadow refresh cadence.
+
+## 2026-10-17 — Water triple jump, custom MP3s, and replayable ending
+- Added Water World double and triple jumps: pressing jump again while airborne applies another upward impulse, up to three jumps in one airborne chain, with bubble bursts beneath the character.
+- Expanded the moving underwater bubble field to 520 touchable bubbles. Contact pops a bubble, plays a fizzy pop, briefly hides it, and respawns it elsewhere.
+- Added per-stage optional music loading from `public/assets/stage01.mp3` (Meadow), `stage02.mp3` (Water), `stage03.mp3` (Bridge), and `stage04.mp3` (Blue Ridge). The built-in synthesized soundtrack is used only if an MP3 errors or doesn't become playable before the load timeout. These user-provided MP3 files are not included in the ZIP; the build copies them automatically once added to `public/assets/`.
+- Added a completion screen after Blue Ridge that promises more worlds to come and offers a selector for any of the four stages. Replay mode doubles each stage's mint pool to 60/60/72/84 and resets every collected-mint counter to zero.
+- Fixed replay progression so entering the next world after replay reactivates that world's doubled mint pool instead of leaving its collectibles hidden.
+- Added build-time regression checks for soundtrack mapping/fallback, underwater triple jump, bubble effects, replay mint duplication/counter resets, the complete level selector, and all three Blue Ridge foothill trampolines.

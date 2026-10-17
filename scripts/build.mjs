@@ -119,6 +119,80 @@ if (!indexSource.includes('id=\"stage-continue-button\"') || !gameSource.include
   throw new Error('New-world arrival must include a working, tappable continue button.');
 }
 
+
+const serveSource = await readFile(path.join(root, 'scripts', 'serve.mjs'), 'utf8');
+const stageAudioAndReplayGuards = [
+  [serveSource.includes("'.mp3': 'audio/mpeg'"), 'local development server serves MP3 with audio/mpeg MIME type'],
+  [gameSource.includes("function stageTrackNumber(world = worldMode)"), 'per-world soundtrack mapping'],
+  [gameSource.includes("return world === 'water' ? '02' : (world === 'bridge' ? '03' : (world === 'mountain' ? '04' : '01'))"), 'stage01–stage04 order'],
+  [gameSource.includes("new URL(`../assets/stage${stageTrackNumber(world)}.mp3`, import.meta.url).href"), 'stage MP3 URL resolves from src/ into assets/'],
+  [gameSource.includes("track.addEventListener('error', activateFallback"), 'MP3 error fallback'],
+  [gameSource.includes("stageMusicMode === 'loading' && track.readyState < HTMLMediaElement.HAVE_FUTURE_DATA"), 'MP3 timeout fallback'],
+  [gameSource.includes("if (stageMusicMode !== 'fallback') return;"), 'synth BGM only plays in fallback mode'],
+  [gameSource.includes('const UNDERWATER_BUBBLE_COUNT = 520;'), 'large sea bubble field'],
+  [gameSource.includes('function spawnWaterJumpBubbles()'), 'double/triple jump bubble effect'],
+  [gameSource.includes('state.waterJumpsUsed < 3'), 'water-stage triple-jump cap'],
+  [gameSource.includes('state.waterJumpsUsed === 2 ? 7.8 : 7.1'), 'distinct second/third jump impulse'],
+  [gameSource.includes('function createReplayMintCopies()'), 'replay mint doubling'],
+  [gameSource.includes('function setReplayCollectibleVisibility(stage)'), 'replay mint visibility reset'],
+  [gameSource.includes('state.pearls = 0; state.waterMintsCollected = 0; state.bridgeMintsCollected = 0; state.mountainMintsCollected = 0;'), 'replay counters reset'],
+  [gameSource.includes("if (replayMode) { setReplayCollectibleVisibility('water'); updateHUD(); }"), 'water replay pool reactivated on stage arrival'],
+  [gameSource.includes("if (replayMode) { setReplayCollectibleVisibility('bridge'); updateHUD(); }"), 'bridge replay pool reactivated on stage arrival'],
+  [gameSource.includes("if (replayMode) { setReplayCollectibleVisibility('mountain'); updateHUD(); }"), 'mountain replay pool reactivated on stage arrival'],
+  [indexSource.includes('More worlds are on the way!'), 'post-level-four promise'],
+  [indexSource.includes('data-replay-stage="meadow"') && indexSource.includes('data-replay-stage="water"') && indexSource.includes('data-replay-stage="bridge"') && indexSource.includes('data-replay-stage="mountain"'), 'selector for all four replayable stages'],
+  [gameSource.includes('function addMountainTrampoline('), 'Blue Ridge foothill trampoline helper'],
+];
+for (const [ok, description] of stageAudioAndReplayGuards) {
+  if (!ok) throw new Error(`Missing soundtrack/replay regression guard: ${description}`);
+}
+const mountainTrampolinePlacements = [...gameSource.matchAll(/addMountainTrampoline\(/g)].length - 1;
+if (mountainTrampolinePlacements !== 3) throw new Error(`Expected three foothill trampolines, found ${mountainTrampolinePlacements}.`);
+for (const cloneCall of [
+  "cloneSet(pearls, scene, 'meadow');",
+  "cloneSet(waterMints, waterWorld, 'water');",
+  "cloneSet(bridgeMints, bridgeWorld, 'bridge');",
+  "cloneSet(mountainMints, mountainWorld, 'mountain');",
+]) {
+  if (!gameSource.includes(cloneCall)) throw new Error(`Replay mode must double every stage's mint pool: ${cloneCall}`);
+}
+const replayMintTotals = {
+  meadow: requirements.MEADOW_MINT_REQUIREMENT.spots * 2,
+  water: requirements.WATER_MINT_REQUIREMENT.spots * 2,
+  bridge: Number(gameSource.match(/const BRIDGE_MINT_TOTAL = Math\.ceil\(BRIDGE_MINT_REQUIREMENT \* MINT_CUSHION\)/) ? 36 : 0) * 2,
+  mountain: Number(gameSource.match(/const MOUNTAIN_MINT_TOTAL = Math\.ceil\(MOUNTAIN_MINT_REQUIREMENT \* MINT_CUSHION\)/) ? 42 : 0) * 2,
+};
+if (replayMintTotals.meadow !== 60 || replayMintTotals.water !== 60 || replayMintTotals.bridge !== 72 || replayMintTotals.mountain !== 84) {
+  throw new Error(`Replay mint totals must be 60/60/72/84; got ${Object.values(replayMintTotals).join('/')}.`);
+}
+
+const styleSource = await readFile(path.join(root, 'src', 'style.css'), 'utf8');
+const interfaceAndPerformanceGuards = [
+  [indexSource, 'id="broadcast-date"', 'Japanese local date HUD'],
+  [indexSource, 'id="stage-goal"', 'stage progress-goal display'],
+  [styleSource, '@media (pointer: coarse) and (orientation: landscape)', 'touch controls in landscape'],
+  [styleSource, 'display: flex !important', 'visible landscape touch controls'],
+  [gameSource, 'Collect 30 Bridge Mints to reach Blue Ridge Mountain', 'Bridge World goal instructions'],
+  [gameSource, 'Collect 35 Fresh Mints to reach the summit', 'Blue Ridge goal instructions'],
+  [gameSource, 'Collect 25 Seafoam Mints to unlock Bridge World', 'Water World goal instructions'],
+  [gameSource, 'addMeadowTrampoline(-53, -22', 'meadow trampoline 1'],
+  [gameSource, 'addMeadowTrampoline(43, -39', 'meadow trampoline 2'],
+  [gameSource, 'addMeadowTrampoline(-45, 59', 'meadow trampoline 3'],
+  [gameSource, 'addMeadowTrampoline(61, 47', 'meadow trampoline 4'],
+  [gameSource, 'state.vy = 29.5', 'massive trampoline launch'],
+  [gameSource, "weather.phase = 'gathering'", 'weather build-up phase'],
+  [gameSource, 'const cloudRate = (weatherInitialized', 'smooth cloud progression'],
+  [gameSource, "import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'", 'merged geometry utility import'],
+  [gameSource, 'mergeGeometries(puffGeometries, false)', 'merged cloud draw calls'],
+  [gameSource, 'renderer.shadowMap.autoUpdate = false', 'throttled high-resolution shadows'],
+  [gameSource, 'now - lastShadowRefresh >= 25', 'shadow cadence for mobile performance'],
+];
+for (const [source, text, description] of interfaceAndPerformanceGuards) {
+  if (!source.includes(text)) throw new Error(`Missing interface/performance feature: ${description}`);
+}
+const trampolinePlacements = [...gameSource.matchAll(/addMeadowTrampoline\(/g)].length - 1; // exclude the function definition
+if (trampolinePlacements !== 4) throw new Error(`Expected exactly 4 meadow trampolines, found ${trampolinePlacements}.`);
+
 for (const relative of [
   'index.html', 'src/main.js', 'src/style.css',
   'assets/cream-soda-umisea-reference.png',
@@ -138,4 +212,5 @@ for (const relative of [
 }
 console.log('Progression verified: Meadow 30 Fizz (goal 25), Water 30 Seafoam Mints (goal 25), Bridge 36 Bridge Mints (goal 30), Blue Ridge 42 Fresh Mints (goal 35).');
 console.log(`Final bridge jump verified: ${deckEdgeGap.toFixed(2)}-unit deck-edge gap, ${climbHeight.toFixed(2)}-unit rise; Sora is on the launch deck.`);
+console.log(`Replay mode verified: ${replayMintTotals.meadow}/${replayMintTotals.water}/${replayMintTotals.bridge}/${replayMintTotals.mountain} mints available with counters reset.`);
 console.log('Build complete: dist/ contains the static GitHub Pages site.');

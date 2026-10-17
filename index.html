@@ -37,6 +37,7 @@
     <div class="broadcast-clock" aria-label="Local time, intended weather, and current lunar phase">
       <span class="broadcast-kicker">LOCAL TIME</span>
       <b id="broadcast-time">--:--</b>
+      <small id="broadcast-date" class="broadcast-date">--月--日</small>
       <small id="weather-chip" class="weather-chip" aria-live="polite">⛅ Scattered clouds</small>
       <small id="moon-readout">☾ Checking the moon…</small>
     </div>
@@ -53,7 +54,22 @@
         <h2 id="finale-title">You found every fizz!</h2>
         <p id="finale-subtitle">A little celebration… then, something is bubbling beneath the meadow.</p>
         <div class="finale-sparkles" aria-hidden="true">✦　✧　·　✧　✦</div>
+        <div id="stage-goal" class="stage-goal">Collect 25 Fizz Mints to progress · 30 available</div>
         <button id="stage-continue-button" class="primary-button is-hidden stage-continue-button" type="button">Explore this world <span>→</span></button>
+      </div>
+    </section>
+
+    <section id="stage-select-overlay" class="overlay is-hidden" aria-label="Choose a world to replay">
+      <div class="small-card stage-select-card">
+        <div class="mini-kicker">SUMMIT REACHED · WELL HIKED</div>
+        <h2>More worlds are on the way!</h2>
+        <p>You have explored all four worlds. Pick any stage to revisit it—this time there are twice as many mints, and every mint counter starts from zero.</p>
+        <div class="stage-select-grid">
+          <button type="button" class="stage-replay-button" data-replay-stage="meadow"><b>01 · Fizzy Meadow</b><small>60 mints available · counter resets</small></button>
+          <button type="button" class="stage-replay-button" data-replay-stage="water"><b>02 · Water World</b><small>60 mints available · counter resets</small></button>
+          <button type="button" class="stage-replay-button" data-replay-stage="bridge"><b>03 · Bridge World</b><small>72 mints available · counter resets</small></button>
+          <button type="button" class="stage-replay-button" data-replay-stage="mountain"><b>04 · Blue Ridge Mountain</b><small>84 mints available · counter resets</small></button>
+        </div>
       </div>
     </section>
 
@@ -71,7 +87,7 @@
             <div class="promise">Meet eight plush friends, trade little stories, and gather fizzy pearls at your own pace.</div>
           </div>
         </div>
-        <div class="welcome-goal"><span class="goal-star">✦</span><span>Wander freely, hop over silly jelly bumps, collect pearls, and say hello to nearby friends.</span></div>
+        <div class="welcome-goal"><span class="goal-star">✦</span><span><b>Collect 25 Fizz Mints to unlock Water World.</b> There are 30 in the meadow, so you can leave some behind. Wander freely and meet the plush friends along the way.</span></div>
         <button id="start-button" class="primary-button" type="button">Enter the meadow <span>→</span></button>
         <p id="startup-status" class="startup-status" role="status" aria-live="polite"></p>
         <div class="welcome-controls"><span>WASD / arrows · move</span><span>SPACE · jump (hold to hop)</span><span>SPACE near a friend · talk / continue</span></div>

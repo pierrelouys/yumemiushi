@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // クリームソーダうみうし — a free-roaming 3D plush friendship meadow.
 // Movement is player-driven on X/Z; Y follows gravity and the shared jump action.
@@ -27,6 +28,11 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.13;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Keep full-resolution, soft shadows but refresh the shadow map at 40 Hz.
+// The slight temporal cadence saves substantial GPU work on phones without softening the image.
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = true;
+let lastShadowRefresh = 0;
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 360);
 const hemi = new THREE.HemisphereLight('#f8fffc', '#69a99c', 2.0);
@@ -56,6 +62,12 @@ scene.add(moonLight);
 let moonMesh = null, moonMaterial = null;
 let lunarPhase = 0, moonIllumination = 0, nightWeight = 0;
 let currentLocalHour = new Date().getHours() + new Date().getMinutes() / 60;
+const skyBaseColor = new THREE.Color('#65bff1');
+const skyBaseFogColor = new THREE.Color('#c3e7f2');
+const skyBaseLowerColor = new THREE.Color('#a5d8e4');
+let baseSunIntensity = 2.55;
+let nextCloudVisualUpdate = 0;
+let lastWeatherAudioUpdate = 0;
 
 // A canvas-textured sky dome gives a real equirectangular gradient on every mobile GPU.
 // The previous shader path could collapse to a flat fallback on some devices, so the
@@ -82,91 +94,37 @@ skyTexture.minFilter = THREE.LinearMipmapLinearFilter;
 skyTexture.magFilter = THREE.LinearFilter;
 let skyPaintSeed = 739391;
 function updateSkyGradient(topColor, horizonColor, lowerColor) {
-  skyUniforms.uTop.value.copy(topColor);
-  skyUniforms.uHorizon.value.copy(horizonColor);
-  skyUniforms.uLower.value.copy(lowerColor);
-  skyUniforms.uCloudiness.value = skyCloudiness;
-  skyUniforms.uNight.value = nightWeight;
   const width = skyCanvas.width, height = skyCanvas.height;
   const css = (color) => `#${color.getHexString(THREE.SRGBColorSpace)}`;
-  const top = topColor.clone();
-  const horizon = horizonColor.clone();
-  const lowBand = horizon.clone().lerp(lowerColor, 0.58);
-  const deepBand = horizon.clone().lerp(lowerColor, 0.91);
-  // The camera looks slightly down over the player, so most visible sky samples the
-  // texture near its equator. Keep the lower half colourful too; the old stops packed
-  // every change into the top half and made the visible sky read as a single blue strip.
   const gradient = skyContext.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, css(top));
-  gradient.addColorStop(0.14, css(top.clone().lerp(horizon, 0.07)));
-  gradient.addColorStop(0.28, css(top.clone().lerp(horizon, 0.20)));
-  gradient.addColorStop(0.40, css(top.clone().lerp(horizon, 0.43)));
-  gradient.addColorStop(0.49, css(horizon));
-  gradient.addColorStop(0.56, css(horizon.clone().lerp(lowerColor, 0.28)));
-  gradient.addColorStop(0.65, css(lowBand));
-  gradient.addColorStop(0.78, css(deepBand));
-  gradient.addColorStop(1, css(deepBand.clone().lerp(lowerColor, 0.12)));
+  const horizonMid = horizonColor.clone().lerp(lowerColor, 0.28);
+  const lowerBand = horizonColor.clone().lerp(lowerColor, 0.62);
+  gradient.addColorStop(0, css(topColor));
+  gradient.addColorStop(0.16, css(topColor.clone().lerp(horizonColor, 0.08)));
+  gradient.addColorStop(0.31, css(topColor.clone().lerp(horizonColor, 0.24)));
+  gradient.addColorStop(0.43, css(topColor.clone().lerp(horizonColor, 0.48)));
+  gradient.addColorStop(0.51, css(horizonColor));
+  gradient.addColorStop(0.60, css(horizonMid));
+  gradient.addColorStop(0.72, css(lowerBand));
+  gradient.addColorStop(1, css(lowerColor));
   skyContext.globalAlpha = 1;
   skyContext.globalCompositeOperation = 'source-over';
   skyContext.fillStyle = gradient;
   skyContext.fillRect(0, 0, width, height);
 
-  // Reproducible cloud layers: high wisps plus wider cumulus/banks. The random seed
-  // changes with the weather mood, not each frame, so the sky never flickers.
-  let seed = skyPaintSeed >>> 0;
-  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  const isNight = nightWeight > 0.52;
-  const isOvercast = skyCloudiness > 0.70;
-  const cloudRGB = isNight ? [66, 82, 120] : (isOvercast ? [132, 148, 165] : [255, 255, 255]);
-  const cloudAlpha = (isNight ? 0.08 : 0.055) + skyCloudiness * (isNight ? 0.25 : 0.36);
-  const cloudCount = Math.round(7 + skyCloudiness * 120);
-  for (let i = 0; i < cloudCount; i++) {
-    const cx = random() * width;
-    const highLayer = random() < 0.38;
-    const cy = height * (highLayer ? 0.12 + random() * 0.25 : 0.31 + random() * 0.30);
-    const rx = (highLayer ? 38 : 55) + random() * (highLayer ? 135 : 175);
-    const ry = (highLayer ? 4 : 8) + random() * (highLayer ? 15 : 33);
-    const puffs = 3 + Math.floor(random() * 6);
-    for (let j = 0; j < puffs; j++) {
-      const x = cx + (random() - 0.5) * rx * 1.6;
-      const y = cy + (random() - 0.5) * ry;
-      const px = rx * (0.20 + random() * 0.40);
-      const py = ry * (0.35 + random() * 0.62);
-      const g = skyContext.createRadialGradient(x, y, 0, x, y, px);
-      const alpha = cloudAlpha * (highLayer ? 0.38 : 1.0);
-      g.addColorStop(0, `rgba(${cloudRGB.join(',')},${alpha})`);
-      g.addColorStop(0.58, `rgba(${cloudRGB.join(',')},${alpha * 0.58})`);
-      g.addColorStop(1, `rgba(${cloudRGB.join(',')},0)`);
-      skyContext.fillStyle = g;
-      skyContext.beginPath(); skyContext.ellipse(x, y, px, py, (random() - 0.5) * 0.12, 0, Math.PI * 2); skyContext.fill();
-    }
-  }
-  if (skyCloudiness > 0.58) {
-    const alpha = (skyCloudiness - 0.52) * (isNight ? 0.26 : 0.30);
-    for (let i = 0; i < 24; i++) {
-      const y = height * (0.30 + random() * 0.34);
-      const x = random() * width;
-      const w = 160 + random() * 390;
-      const h = 14 + random() * 37;
-      const band = skyContext.createLinearGradient(x, y - h, x, y + h);
-      band.addColorStop(0, `rgba(${cloudRGB.join(',')},0)`);
-      band.addColorStop(0.5, `rgba(${cloudRGB.join(',')},${alpha})`);
-      band.addColorStop(1, `rgba(${cloudRGB.join(',')},0)`);
-      skyContext.fillStyle = band; skyContext.fillRect(x - w * 0.5, y - h, w, h * 2);
-    }
-  }
-  // Bright hazy sun-glow on clear days, and a warm horizon at dawn/dusk. The actual
-  // 3D sun remains separate so clouds can obscure it naturally.
+  // Soft sunrise/sunset glow is static between local-clock updates; cloud density and
+  // sun visibility are handled by cheap material/lighting updates, not canvas uploads.
   const hour = currentLocalHour;
   const dawn = 1 - smooth01(5.0, 8.4, hour);
   const dusk = smooth01(16.4, 19.8, hour);
   const twilight = Math.max(dawn * smooth01(4.0, 5.4, hour), dusk);
-  if (!isNight && skyCloudiness < 0.66 && twilight > 0.08) {
-    const glow = skyContext.createRadialGradient(width * 0.50, height * 0.49, 1, width * 0.50, height * 0.49, height * 0.30);
-    glow.addColorStop(0, `rgba(255,${Math.round(180 + twilight * 38)},${Math.round(136 + twilight * 38)},${0.22 * twilight})`);
-    glow.addColorStop(0.40, `rgba(255,176,150,${0.10 * twilight})`);
+  if (nightWeight < 0.55 && twilight > 0.08) {
+    const glow = skyContext.createRadialGradient(width * 0.50, height * 0.52, 1, width * 0.50, height * 0.52, height * 0.34);
+    glow.addColorStop(0, `rgba(255,${Math.round(180 + twilight * 38)},${Math.round(136 + twilight * 38)},${0.24 * twilight})`);
+    glow.addColorStop(0.4, `rgba(255,176,150,${0.10 * twilight})`);
     glow.addColorStop(1, 'rgba(255,176,150,0)');
-    skyContext.fillStyle = glow; skyContext.fillRect(0, 0, width, height);
+    skyContext.fillStyle = glow;
+    skyContext.fillRect(0, 0, width, height);
   }
   skyTexture.needsUpdate = true;
 }
@@ -198,11 +156,12 @@ starPoints.frustumCulled = false; starPoints.renderOrder = -90; skyDome.add(star
 let sunDiscMesh = null, sunGlowMesh = null;
 let underwaterRayMaterial = null;
 const cloudClusters = [];
-let skyCloudiness = 0.28;
+let skyCloudiness = 0.12;
+let targetSkyCloudiness = 0.12;
 let skyMoodName = 'scattered clouds';
 let weatherInitialized = false;
 let nextSkyMoodAt = performance.now() + 48000 + Math.random() * 42000;
-const sunDiscMaterial = new THREE.MeshBasicMaterial({ color: '#fff6cc', toneMapped: false, fog: false });
+const sunDiscMaterial = new THREE.MeshBasicMaterial({ color: '#fff6cc', transparent: true, opacity: 1, depthWrite: false, toneMapped: false, fog: false });
 const sunGlowMaterial = new THREE.MeshBasicMaterial({ color: '#ffd58c', transparent: true, opacity: 0.26, depthWrite: false, toneMapped: false, fog: false, blending: THREE.AdditiveBlending });
 sunGlowMesh = new THREE.Mesh(new THREE.SphereGeometry(9.0, 24, 16), sunGlowMaterial);
 sunDiscMesh = new THREE.Mesh(new THREE.SphereGeometry(4.1, 32, 24), sunDiscMaterial);
@@ -215,76 +174,112 @@ const cloudDayColor = new THREE.Color('#f5fbff');
 const cloudNightColor = new THREE.Color('#39455d');
 const cloudOvercastColor = new THREE.Color('#a8b5c5');
 const cloudShadeColor = new THREE.Color('#72849d');
+const skyDirectionScratch = new THREE.Vector3();
+const overcastSkyLand = new THREE.Color('#abb9c8');
+const overcastFogLand = new THREE.Color('#c5d1dc');
+const overcastSkyWater = new THREE.Color('#668b9c');
+const overcastFogWater = new THREE.Color('#6da8b4');
+const overcastSkyMountain = new THREE.Color('#9aafbd');
+const overcastFogMountain = new THREE.Color('#bccbd5');
 let skyCloudSeed = 62491;
 function skyRand() { skyCloudSeed = (skyCloudSeed * 1664525 + 1013904223) >>> 0; return skyCloudSeed / 4294967296; }
 for (let i = 0; i < 26; i++) {
   const cluster = new THREE.Group();
+  const clusterMaterial = cloudMats[Math.floor(skyRand() * cloudMats.length)].clone();
+  clusterMaterial.opacity = 0;
   const puffCount = 4 + Math.floor(skyRand() * 4);
+  const puffGeometries = [];
   for (let j = 0; j < puffCount; j++) {
-    const puff = new THREE.Mesh(cloudBlobGeometry, cloudMats[Math.floor(skyRand() * cloudMats.length)]);
-    puff.position.set((skyRand() - 0.5) * 13, (skyRand() - 0.5) * 2.8, (skyRand() - 0.5) * 3.2);
-    puff.scale.set(4.0 + skyRand() * 6.5, 1.7 + skyRand() * 1.45, 2.4 + skyRand() * 3.2);
-    cluster.add(puff);
+    const puffGeometry = cloudBlobGeometry.clone();
+    const puffPosition = new THREE.Vector3((skyRand() - 0.5) * 13, (skyRand() - 0.5) * 2.8, (skyRand() - 0.5) * 3.2);
+    const puffScale = new THREE.Vector3(4.0 + skyRand() * 6.5, 1.7 + skyRand() * 1.45, 2.4 + skyRand() * 3.2);
+    puffGeometry.applyMatrix4(new THREE.Matrix4().compose(puffPosition, new THREE.Quaternion(), puffScale));
+    puffGeometries.push(puffGeometry);
   }
+  // Merge all puffs into one draw call per cloud cluster. This keeps the same
+  // rounded silhouette and smooth material fading while helping mobile GPUs.
+  const mergedCloudGeometry = mergeGeometries(puffGeometries, false);
+  for (const geometry of puffGeometries) geometry.dispose();
+  mergedCloudGeometry.computeBoundingSphere();
+  cluster.add(new THREE.Mesh(mergedCloudGeometry, clusterMaterial));
   const angle = skyRand() * Math.PI * 2;
   const radius = 143 + skyRand() * 47;
   cluster.position.set(Math.cos(angle) * radius, 23 + skyRand() * 42, Math.sin(angle) * radius);
-  cluster.userData = { roll: (skyRand() - 0.5) * 0.035, sway: skyRand() * Math.PI * 2, homeX: cluster.position.x, threshold: skyRand() };
+  cluster.userData = { roll: (skyRand() - 0.5) * 0.035, sway: skyRand() * Math.PI * 2, homeX: cluster.position.x, threshold: skyRand(), material: clusterMaterial, baseOpacity: 0.78 };
   cluster.visible = false;
   skyDome.add(cluster); cloudClusters.push(cluster);
 }
+cloudBlobGeometry.dispose();
 function chooseSkyMood(now = performance.now()) {
-  if (weatherInitialized && weather.kind === 'rain') {
-    skyMoodName = 'rain clouds'; skyCloudiness = 0.84 + Math.random() * 0.14;
-  } else if (weatherInitialized && weather.kind === 'wind') {
-    if (Math.random() < 0.36) { skyMoodName = 'windy clear skies'; skyCloudiness = 0.06 + Math.random() * 0.16; }
-    else { skyMoodName = 'wind-blown clouds'; skyCloudiness = 0.35 + Math.random() * 0.27; }
+  const isWeatherTransition = weatherInitialized && weather && (weather.phase === 'gathering' || weather.phase === 'active' || weather.phase === 'clearing');
+  if (isWeatherTransition && weather.phase === 'gathering') {
+    targetSkyCloudiness = weather.pendingKind === 'rain' ? 0.90 : (weather.windCloudTarget ?? 0.42);
+    skyMoodName = weather.pendingKind === 'rain' ? 'clouds gathering before a shower' : 'wind-blown clouds gathering';
+  } else if (isWeatherTransition && weather.phase === 'active' && weather.kind === 'rain') {
+    targetSkyCloudiness = 0.93 + Math.random() * 0.05; skyMoodName = 'rain clouds';
+  } else if (isWeatherTransition && weather.phase === 'active' && weather.kind === 'wind') {
+    targetSkyCloudiness = weather.windCloudTarget ?? 0.4; skyMoodName = 'wind-blown clouds';
+  } else if (isWeatherTransition && weather.phase === 'clearing') {
+    targetSkyCloudiness = 0.035 + Math.random() * 0.11; skyMoodName = 'clouds clearing';
   } else {
     const r = Math.random();
-    if (r < 0.34) { skyMoodName = 'clear skies'; skyCloudiness = 0.025 + Math.random() * 0.12; }
-    else if (r < 0.78) { skyMoodName = 'scattered clouds'; skyCloudiness = 0.32 + Math.random() * 0.27; }
-    else { skyMoodName = 'overcast'; skyCloudiness = 0.76 + Math.random() * 0.20; }
+    if (r < 0.34) { skyMoodName = 'clear skies'; targetSkyCloudiness = 0.025 + Math.random() * 0.12; }
+    else if (r < 0.78) { skyMoodName = 'scattered clouds'; targetSkyCloudiness = 0.30 + Math.random() * 0.24; }
+    else { skyMoodName = 'overcast'; targetSkyCloudiness = 0.68 + Math.random() * 0.19; }
   }
-  skyPaintSeed = Math.floor(Math.random() * 0xffffffff) >>> 0;
-  nextSkyMoodAt = now + 48000 + Math.random() * 85000;
-  for (const cloud of cloudClusters) cloud.visible = cloud.userData.threshold < skyCloudiness;
-  // The intended sky condition lives in the local-time/weather box, not the minimap.
+  nextSkyMoodAt = now + 68000 + Math.random() * 62000;
   if (weatherInitialized) updateWeatherReadout();
-  applyLocalTime();
 }
 function updateSkyActors(now = performance.now()) {
   if (now >= nextSkyMoodAt) chooseSkyMood(now);
-  const hour = currentLocalHour;
   const daylight = 1 - nightWeight;
-  // The sun travels east-to-west across the visible sky, dipping below the horizon at night.
-  const arc = THREE.MathUtils.clamp((hour - 6) / 12, 0, 1) * Math.PI;
-  const altitude = Math.sin(arc) * 0.14 + 0.015;
-  const direction = new THREE.Vector3(-Math.cos(arc) * 0.94, altitude, -Math.sin(arc) * 0.94).normalize();
+  // Keep the sun in the visible band of the camera-centred sky dome.
+  const arc = THREE.MathUtils.clamp((currentLocalHour - 6) / 12, 0, 1) * Math.PI;
+  const altitude = Math.sin(arc) * 0.19 + 0.035;
+  const direction = skyDirectionScratch.set(-Math.cos(arc) * 0.88, altitude, -Math.sin(arc) * 0.88).normalize();
   sunDiscMesh.position.copy(direction).multiplyScalar(257);
   sunGlowMesh.position.copy(direction).multiplyScalar(251);
-  sunDiscMesh.visible = daylight > 0.035 && skyCloudiness < 0.72 && worldMode !== 'water';
-  sunGlowMesh.visible = daylight > 0.02 && skyCloudiness < 0.86 && worldMode !== 'water';
+  const sunVisibility = daylight * (1 - smooth01(0.58, 0.96, skyCloudiness));
+  sunDiscMesh.visible = daylight > 0.035 && skyCloudiness < 0.97 && worldMode !== 'water';
+  sunDiscMaterial.opacity = sunVisibility;
+  sunGlowMesh.visible = daylight > 0.02 && skyCloudiness < 0.99 && worldMode !== 'water';
   if (underwaterRayMaterial) {
     const rayDay = THREE.MathUtils.clamp(daylight, 0, 1) * (0.35 + 0.65 * Math.max(0, altitude));
     underwaterRayMaterial.opacity = worldMode === 'water' ? 0.74 * rayDay * (1 - THREE.MathUtils.smoothstep(skyCloudiness, 0.42, 0.9)) : 0;
   }
   skyUniforms.uTime.value = now;
   skyUniforms.uNight.value = nightWeight;
-  sunGlowMaterial.opacity = (0.12 + altitude * 0.21) * (1 - skyCloudiness * 0.42);
-  const cloudColor = nightWeight > 0.45 ? cloudNightColor : (skyCloudiness > 0.65 ? cloudOvercastColor : cloudDayColor);
-  for (let i = 0; i < cloudClusters.length; i++) {
-    const cloud = cloudClusters[i];
-    cloud.visible = worldMode !== 'water' && cloud.userData.threshold < skyCloudiness;
+  sunGlowMaterial.opacity = (0.12 + altitude * 0.21) * (1 - skyCloudiness * 0.54);
+
+  // Cloud clusters are positioned every frame, but their material work is throttled.
+  // Unique per-cluster materials let opacity interpolate smoothly as coverage changes.
+  if (now >= nextCloudVisualUpdate) {
+    const cloudColor = nightWeight > 0.45 ? cloudNightColor : (skyCloudiness > 0.65 ? cloudOvercastColor : cloudDayColor);
+    for (const cloud of cloudClusters) {
+      const coverage = smooth01(cloud.userData.threshold - 0.15, cloud.userData.threshold + 0.22, skyCloudiness);
+      cloud.visible = worldMode !== 'water' && coverage > 0.006;
+      cloud.userData.material.color.copy(cloudColor).lerp(cloudShadeColor, Math.max(0, skyCloudiness - 0.62) * 0.48);
+      cloud.userData.material.opacity = cloud.userData.baseOpacity * coverage * (nightWeight > 0.45 ? 0.48 : 0.82 + skyCloudiness * 0.12);
+    }
+    nextCloudVisualUpdate = now + 180;
+  }
+  for (const cloud of cloudClusters) {
     cloud.position.x = cloud.userData.homeX + Math.sin(now * 0.000035 + cloud.userData.sway) * 3.8;
     cloud.rotation.z = Math.sin(now * 0.00012 + cloud.userData.sway) * 0.018 + cloud.userData.roll;
-    cloud.traverse(obj => {
-      if (!obj.isMesh || !obj.material?.color) return;
-      obj.material.color.copy(cloudColor).lerp(cloudShadeColor, Math.max(0, skyCloudiness - 0.62) * 0.48);
-      obj.material.opacity = nightWeight > 0.45 ? 0.36 : 0.76 + skyCloudiness * 0.14;
-    });
   }
 }
-
+function updateDynamicSky(dt, now) {
+  const cloudRate = (weatherInitialized && (weather.phase === 'gathering' || weather.phase === 'clearing')) ? 0.062 : 0.026;
+  skyCloudiness += (targetSkyCloudiness - skyCloudiness) * (1 - Math.exp(-cloudRate * dt));
+  skyCloudiness = THREE.MathUtils.clamp(skyCloudiness, 0, 1);
+  const overcastSky = worldMode === 'water' ? overcastSkyWater : (worldMode === 'mountain' ? overcastSkyMountain : overcastSkyLand);
+  const overcastFog = worldMode === 'water' ? overcastFogWater : (worldMode === 'mountain' ? overcastFogMountain : overcastFogLand);
+  scene.background.copy(skyBaseColor).lerp(overcastSky, skyCloudiness * 0.34);
+  scene.fog.color.copy(skyBaseFogColor).lerp(overcastFog, skyCloudiness * 0.28);
+  const tint = skyCloudiness;
+  skyMaterial.color.setRGB(1 - tint * 0.17, 1 - tint * 0.12, 1 - tint * 0.055);
+  sun.intensity = baseSunIntensity * (1 - skyCloudiness * 0.58);
+}
 // The sky and lighting follow the player's real local clock (not an accelerated game clock).
 const daylightKeys = [
   { h: 0, sky: '#030714', fog: '#09111e', hemi: '#29344c', ground: '#101a19', sun: '#839bcf', sunI: 0.0, hemiI: 0.12, fillI: 0.025 },
@@ -357,6 +352,8 @@ function applyLocalTime() {
   nightWeight = localNightAmount(hour);
   const clockText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   $('#broadcast-time').textContent = clockText;
+  const dateNode = $('#broadcast-date');
+  if (dateNode) dateNode.textContent = `${now.getMonth() + 1}月${now.getDate()}日`;
   const moonIcon = lunarPhase < 0.04 || lunarPhase > 0.96 ? '●' : (lunarPhase < 0.5 ? '☽' : '☾');
   $('#moon-readout').textContent = `${moonIcon} ${lunar.name} · ${Math.round(moonIllumination * 100)}%`;
   if (weatherInitialized) updateWeatherReadout();
@@ -370,14 +367,10 @@ function applyLocalTime() {
   const skyColor = mixColor(left.sky, right.sky);
   const fogColor = mixColor(left.fog, right.fog);
   const lowerColor = mixColor(left.ground, right.ground);
-  scene.background.copy(skyColor);
-  scene.fog.color.copy(fogColor);
-  // The cloud pass is stronger than a simple colour wash: clear skies stay saturated,
-  // scattered cloud breaks have bright edges, and overcast skies diffuse the horizon.
-  const overcastSky = new THREE.Color(nightWeight > 0.55 ? '#0c1425' : (worldMode === 'water' ? '#668b9c' : '#abb9c8'));
-  const overcastFog = new THREE.Color(nightWeight > 0.55 ? '#101b2d' : (worldMode === 'water' ? '#6da8b4' : '#c5d1dc'));
-  scene.background.lerp(overcastSky, skyCloudiness * 0.34);
-  scene.fog.color.lerp(overcastFog, skyCloudiness * 0.28);
+  skyBaseColor.copy(skyColor);
+  skyBaseFogColor.copy(fogColor);
+  scene.background.copy(skyBaseColor);
+  scene.fog.color.copy(skyBaseFogColor);
   const dawnWeight = smooth01(4.6, 6.8, hour) * (1 - smooth01(7.0, 8.8, hour));
   const duskWeight = smooth01(16.1, 18.3, hour) * (1 - smooth01(19.0, 21.0, hour));
   const twilightWeight = Math.max(dawnWeight, duskWeight);
@@ -391,17 +384,17 @@ function applyLocalTime() {
     if (worldMode === 'water') lowerAtmosphere.lerp(new THREE.Color('#8acbd9'), 0.28);
     if (worldMode === 'bridge') lowerAtmosphere.lerp(new THREE.Color('#c8aa9b'), 0.22);
     if (worldMode === 'mountain') lowerAtmosphere.lerp(new THREE.Color('#a2bed0'), 0.16);
-  } else if (skyCloudiness > 0.70) {
-    lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#9cbcc7' : '#bdcbd7');
   } else {
     lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#b4f0f1' : (worldMode === 'bridge' ? '#f0e7d8' : (worldMode === 'mountain' ? '#d4e4ee' : '#f3f7ff')));
   }
-  updateSkyGradient(scene.background.clone().multiplyScalar(nightWeight > 0.55 ? 0.74 : 0.86), scene.fog.color, lowerAtmosphere);
+  skyBaseLowerColor.copy(lowerAtmosphere);
+  updateSkyGradient(skyBaseColor.clone().multiplyScalar(nightWeight > 0.55 ? 0.74 : 0.86), skyBaseFogColor, skyBaseLowerColor);
   updateSkyActors(performance.now());
   hemi.color.copy(mixColor(left.hemi, right.hemi));
   hemi.groundColor.copy(lowerColor);
   sun.color.copy(mixColor(left.sun, right.sun));
-  sun.intensity = THREE.MathUtils.lerp(left.sunI, right.sunI, t) * (1 - skyCloudiness * 0.58);
+  baseSunIntensity = THREE.MathUtils.lerp(left.sunI, right.sunI, t);
+  sun.intensity = baseSunIntensity * (1 - skyCloudiness * 0.58);
   hemi.intensity = THREE.MathUtils.lerp(left.hemiI, right.hemiI, t);
   fillLight.intensity = THREE.MathUtils.lerp(left.fillI, right.fillI, t) * (1 - nightWeight * 0.55);
   const daylightAngle = ((hour - 6) / 12) * Math.PI;
@@ -1196,12 +1189,79 @@ for (let i = 0; i < 22; i++) {
   }
   waterWorld.add(coral);
 }
-const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.45, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
+// A large, world-wide population of touchable bubbles uses one instanced draw call for mobile performance.
+const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.48, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
+const underwaterBubbleGeometry = new THREE.SphereGeometry(1, 10, 8);
+const UNDERWATER_BUBBLE_COUNT = 520;
+const underwaterBubbleMesh = new THREE.InstancedMesh(underwaterBubbleGeometry, underwaterBubbleMaterial, UNDERWATER_BUBBLE_COUNT);
+underwaterBubbleMesh.frustumCulled = false; underwaterBubbleMesh.visible = false; waterWorld.add(underwaterBubbleMesh);
 const underwaterBubbles = [];
-for (let i = 0; i < 176; i++) {
-  const bubble = new THREE.Mesh(new THREE.SphereGeometry(0.085 + waterRand() * 0.20, 12, 9), underwaterBubbleMaterial);
-  const x = (waterRand() * 2 - 1) * 98, z = (waterRand() * 2 - 1) * 98, baseY = waterRand() * 26;
-  bubble.position.set(x, baseY, z); waterWorld.add(bubble); underwaterBubbles.push({ mesh: bubble, baseX: x, baseZ: z, baseY, riseSpeed: 0.00018 + waterRand() * 0.00024, drift: 0.25 + waterRand() * 0.95, phase: waterRand() * Math.PI * 2 });
+const underwaterBubbleDummy = new THREE.Object3D();
+for (let i = 0; i < UNDERWATER_BUBBLE_COUNT; i++) {
+  const x = (waterRand() * 2 - 1) * 98, z = (waterRand() * 2 - 1) * 98;
+  const baseY = i < 190 ? 0.12 + waterRand() * 4.5 : 3 + waterRand() * 24;
+  underwaterBubbles.push({ baseX: x, baseZ: z, baseY, size: 0.085 + waterRand() * 0.20, riseSpeed: 0.00020 + waterRand() * 0.00034, drift: 0.28 + waterRand() * 1.1, phase: waterRand() * Math.PI * 2, poppedUntil: 0, currentX: x, currentY: baseY, currentZ: z });
+}
+underwaterBubbleMesh.count = underwaterBubbles.length;
+const waterJumpBubbles = [];
+const waterJumpBubbleGeometry = new THREE.SphereGeometry(0.13, 10, 8);
+const waterJumpBubbleBaseMaterial = new THREE.MeshPhysicalMaterial({ color: '#e6ffff', roughness: 0.06, transparent: true, opacity: 0.68, clearcoat: 1, depthWrite: false });
+function spawnWaterJumpBubbles() {
+  if (worldMode !== 'water') return;
+  for (let i = 0; i < 11; i++) {
+    const material = waterJumpBubbleBaseMaterial.clone();
+    const mesh = new THREE.Mesh(waterJumpBubbleGeometry, material);
+    const angle = (i / 11) * Math.PI * 2 + rand() * 0.3;
+    mesh.position.set(state.x + Math.cos(angle) * (0.22 + rand() * 0.38), state.y + 0.16, state.z + Math.sin(angle) * (0.22 + rand() * 0.38));
+    mesh.scale.setScalar(0.55 + rand() * 0.75); mesh.renderOrder = 3; waterWorld.add(mesh);
+    waterJumpBubbles.push({ mesh, material, vx: Math.cos(angle) * (0.3 + rand() * 0.65), vz: Math.sin(angle) * (0.3 + rand() * 0.65), vy: 0.6 + rand() * 1.1, life: 0.55 + rand() * 0.35, maxLife: 0.9 });
+  }
+}
+function updateWaterJumpBubbles(dt) {
+  for (let i = waterJumpBubbles.length - 1; i >= 0; i--) {
+    const bubble = waterJumpBubbles[i]; bubble.life -= dt;
+    bubble.mesh.position.x += bubble.vx * dt; bubble.mesh.position.z += bubble.vz * dt; bubble.mesh.position.y += bubble.vy * dt;
+    bubble.vy += 0.22 * dt;
+    const k = Math.max(0, bubble.life / bubble.maxLife); bubble.material.opacity = 0.68 * k;
+    bubble.mesh.scale.multiplyScalar(1 + dt * 0.9);
+    if (bubble.life <= 0) { waterWorld.remove(bubble.mesh); bubble.material.dispose(); waterJumpBubbles.splice(i, 1); }
+  }
+}
+function updateUnderwaterBubbleField(now) {
+  underwaterBubbleMesh.visible = worldMode === 'water';
+  if (worldMode !== 'water') return;
+  const surge = seaCurrent.active ? 5.5 : 1.0;
+  const popDistanceSq = 1.06 * 1.06;
+  const playerY = state.y + 1.15;
+  for (let i = 0; i < underwaterBubbles.length; i++) {
+    const bubble = underwaterBubbles[i];
+    let x = bubble.baseX + Math.sin(now * 0.00062 + bubble.phase) * bubble.drift * surge + (seaCurrent.active ? seaCurrent.x * Math.sin(now * 0.001 + bubble.phase) * 0.85 : 0);
+    let y = 0.25 + (((bubble.baseY + now * bubble.riseSpeed * surge) % 30 + 30) % 30);
+    let z = bubble.baseZ + Math.cos(now * 0.00047 + bubble.phase) * bubble.drift * 0.52 + (seaCurrent.active ? seaCurrent.z * Math.cos(now * 0.0011 + bubble.phase) * 0.65 : 0);
+    if (now < bubble.poppedUntil) {
+      underwaterBubbleDummy.position.set(x, -300, z); underwaterBubbleDummy.scale.setScalar(0.001);
+    } else {
+      bubble.currentX = x; bubble.currentY = y; bubble.currentZ = z;
+      const dx = x - state.x, dy = y - playerY, dz = z - state.z;
+      if (state.started && !state.paused && !state.finale.active && Math.abs(dx) < 1.9 && Math.abs(dz) < 1.9 && Math.abs(dy) < 1.45 && dx*dx + dy*dy + dz*dz < popDistanceSq + bubble.size * bubble.size) {
+        bubble.poppedUntil = now + 420;
+        bubble.baseX = THREE.MathUtils.clamp(state.x + (rand() - 0.5) * 36, -98, 98);
+        bubble.baseZ = THREE.MathUtils.clamp(state.z + (rand() - 0.5) * 36, -98, 98);
+        bubble.baseY = 0.5 + rand() * 20;
+        // A crisp, fizzy pop; effects route through the SFX bus, not the music track.
+        sfx(880 + rand() * 260, 0.065, 'sine', 0.09);
+        sfx(410 + rand() * 120, 0.045, 'triangle', 0.035);
+        sparkle(new THREE.Vector3(x, y, z), 3);
+        underwaterBubbleDummy.position.set(x, -300, z); underwaterBubbleDummy.scale.setScalar(0.001);
+      } else {
+        const pulse = 0.93 + Math.sin(now * 0.0018 + bubble.phase) * 0.07 + (seaCurrent.active ? 0.12 : 0);
+        underwaterBubbleDummy.position.set(x, y, z); underwaterBubbleDummy.scale.setScalar(bubble.size * pulse);
+      }
+    }
+    underwaterBubbleDummy.rotation.set(Math.sin(now * 0.0007 + bubble.phase) * 0.05, bubble.phase, Math.cos(now * 0.0006 + bubble.phase) * 0.05);
+    underwaterBubbleDummy.updateMatrix(); underwaterBubbleMesh.setMatrixAt(i, underwaterBubbleDummy.matrix);
+  }
+  underwaterBubbleMesh.instanceMatrix.needsUpdate = true;
 }
 const seaCurrent = { active: false, nextAt: performance.now() + 18000, until: 0, x: 0.72, z: -0.42, strength: 2.5, nextBubbleSound: 0 };
 // Directional white foam makes ocean currents readable before they push the player.
@@ -1826,7 +1886,75 @@ function addJellyBar(x, z, rotation = 0, scale = 1, color = '#ffa8b8') {
 [
   [0,-8,0,1,'#ffa8b8'], [28,9,Math.PI/2,1.05,'#c8b8f3'], [-27,20,-0.42,1,'#ffdc8b'],
   [43,-46,0.62,1.08,'#a7e5d7'], [-43,-55,0,1,'#ffa8b8'],
-].forEach(args => addJellyBar(...args));
+ ].forEach(args => addJellyBar(...args));
+
+// Giant plush trampolines: walking onto one starts automatic little bounces; pressing
+// jump while primed turns that spring into a huge launch. Four spacious pads are scattered
+// around the meadow rather than blocking the starting area.
+const trampolines = [];
+const trampolineDrumMat = new THREE.MeshStandardMaterial({ map: platformMintTexture, bumpMap: platformMintBump, bumpScale: 0.085, color: '#6bd9c7', roughness: 0.82, metalness: 0.02 });
+const trampolineTopMat = new THREE.MeshStandardMaterial({ map: platformMintTexture, bumpMap: platformMintBump, bumpScale: 0.11, color: '#d1fff2', roughness: 0.95 });
+const trampolineTrimMat = new THREE.MeshStandardMaterial({ color: '#fff5df', roughness: 0.72, metalness: 0.04 });
+function addMeadowTrampoline(x, z, accent = '#f8c7d4') {
+  const group = new THREE.Group();
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(3.05, 3.34, 0.48, 44, 1), trampolineDrumMat);
+  drum.position.y = 0.22; drum.castShadow = false; drum.receiveShadow = true; group.add(drum);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(2.88, 48), trampolineTopMat);
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.468; top.renderOrder = 1; group.add(top);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.98, 0.18, 10, 48), trampolineTrimMat);
+  rim.rotation.x = -Math.PI / 2; rim.position.y = 0.462; group.add(rim);
+  const innerStitchMat = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.9 });
+  const stitch = new THREE.Mesh(new THREE.TorusGeometry(2.56, 0.035, 5, 48), innerStitchMat);
+  stitch.rotation.x = -Math.PI / 2; stitch.position.y = 0.477; group.add(stitch);
+  const springMat = new THREE.MeshStandardMaterial({ color: '#f7e7c5', roughness: 0.8, metalness: 0.16 });
+  for (let i = 0; i < 10; i++) {
+    const angle = i / 10 * Math.PI * 2;
+    const spring = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.085, 0.28, 7), springMat);
+    spring.position.set(Math.cos(angle) * 3.0, 0.19, Math.sin(angle) * 3.0);
+    spring.rotation.z = Math.cos(angle) * 0.15; spring.rotation.x = Math.sin(angle) * 0.15; group.add(spring);
+  }
+  group.position.set(x, 0, z); scene.add(group); landDecorationObjects.push(group);
+  const pad = { group, x, z, radius: 3.0, topY: 0.48, top, rim, topBaseY: top.position.y, rimBaseY: rim.position.y, lastBounceAt: -10000, lastSoundAt: -10000, phase: rand() * Math.PI * 2 };
+  trampolines.push(pad); return pad;
+}
+addMeadowTrampoline(-53, -22, '#f4aebd');
+addMeadowTrampoline(43, -39, '#b6a8f0');
+addMeadowTrampoline(-45, 59, '#f4c875');
+addMeadowTrampoline(61, 47, '#f2a8c9');
+const mountainTrampolines = [];
+function addMountainTrampoline(x, z, accent = '#9ddfff') {
+  const group = new THREE.Group();
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(3.05, 3.34, 0.48, 36, 1), trampolineDrumMat);
+  drum.position.y = 0.22; drum.receiveShadow = true; group.add(drum);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(2.88, 40), trampolineTopMat); top.rotation.x = -Math.PI / 2; top.position.y = 0.468; group.add(top);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.98, 0.18, 9, 40), trampolineTrimMat); rim.rotation.x = -Math.PI / 2; rim.position.y = 0.462; group.add(rim);
+  const stitch = new THREE.Mesh(new THREE.TorusGeometry(2.56, 0.035, 5, 40), new THREE.MeshStandardMaterial({ color: accent, roughness: 0.9 }));
+  stitch.rotation.x = -Math.PI / 2; stitch.position.y = 0.477; group.add(stitch);
+  group.position.set(x, 0, z); mountainWorld.add(group);
+  const pad = { group, x, z, radius: 3.0, topY: 0.48, top, rim, topBaseY: top.position.y, rimBaseY: rim.position.y, lastBounceAt: -10000, lastSoundAt: -10000, phase: rand() * Math.PI * 2 };
+  mountainTrampolines.push(pad); return pad;
+}
+addMountainTrampoline(-10, 87, '#92d8ff');
+addMountainTrampoline(0, 88, '#bee8ff');
+addMountainTrampoline(10, 87, '#86c7ed');
+function activeTrampolineSet() { return worldMode === 'mountain' ? mountainTrampolines : (worldMode === 'meadow' ? trampolines : []); }
+function findTrampolineAt(x, z) {
+  for (const pad of activeTrampolineSet()) if (Math.hypot(x - pad.x, z - pad.z) <= pad.radius) return pad;
+  return null;
+}
+function trampolineSupportBelow(x, z, y) {
+  const pad = findTrampolineAt(x, z);
+  return pad && y <= pad.topY + 0.18 ? pad.topY : 0;
+}
+function updateTrampolineVisuals(now) {
+  for (const pad of activeTrampolineSet()) {
+    const age = Math.max(0, (now - pad.lastBounceAt) / 1000);
+    const compression = age < 0.20 ? Math.sin((age / 0.20) * Math.PI) * 0.13 : 0;
+    const idleRipple = Math.sin(now * 0.0022 + pad.phase) * 0.018;
+    pad.top.position.y = pad.topBaseY - compression + idleRipple;
+    pad.rim.position.y = pad.rimBaseY - compression * 0.45;
+  }
+}
 
 // --- State, controls, music --------------------------------------------------------------------
 const state = {
@@ -1834,12 +1962,13 @@ const state = {
   vx: 0, vy: 0, vz: 0, yaw: Math.PI, knockbackUntil: 0,
   pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, mountainMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
   mintGiftClaimed: false, stageAwaitingTap: false,
+  trampolineReadyUntil: 0, trampolineLaunchUntil: 0, waterJumpsUsed: 0,
   highJumpUntil: 0, highJumpWasActive: false, bridgeStageComplete: false,
   activeFriend: null, activeDialogueLines: null, toastUntil: 0, bob: 0,
   finale: { active: false, targetWorld: 'water', startAt: 0, baseYaw: Math.PI, camOffset: new THREE.Vector3(7.8, 7.2, 12.4), fovStart: 55, enteredWater: false, overlayShown: false },
 };
 const held = { left: false, right: false, forward: false, back: false, jump: false };
-let weather = { kind: 'clear', nextAt: performance.now() + 10000 + rand() * 6000, until: 0, windX: 0, windZ: 0 };
+let weather = { kind: 'clear', phase: 'clear', pendingKind: null, phaseStarted: 0, phaseEnds: 0, windCloudTarget: 0.42, nextAt: performance.now() + 38000 + rand() * 22000, until: 0, windX: 0, windZ: 0 };
 weatherInitialized = true;
 chooseSkyMood();
 let nextMinimapDraw = 0;
@@ -1853,6 +1982,8 @@ let stickPointer = null, actionPointer = null;
 let audioContext = null, masterGain = null, musicBus = null, fxBus = null, compressor = null;
 let rainNoiseGain = null, windNoiseGain = null;
 let musicNextTime = 0, musicStep = 0, nextUnderwaterBloop = 0;
+let stageMusicElement = null, stageMusicWorld = null, stageMusicMode = 'idle', stageMusicToken = 0;
+let replayMintPoolsExpanded = false, replayMode = false;
 
 // Rain is localised around the player so it remains light enough for mobile GPUs.
 const RAIN_COUNT = 240;
@@ -1916,7 +2047,49 @@ function note(freq, when, duration, type = 'triangle', volume = 0.1, bus = music
   gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
   osc.connect(gain); gain.connect(bus); osc.start(when); osc.stop(when + duration + 0.025);
 }
+function stageTrackNumber(world = worldMode) {
+  return world === 'water' ? '02' : (world === 'bridge' ? '03' : (world === 'mountain' ? '04' : '01'));
+}
+function tryPlayStageMusic() {
+  if (!stageMusicElement || !state.soundOn || !state.started || stageMusicMode === 'fallback') return;
+  stageMusicElement.volume = 0.74;
+  const promise = stageMusicElement.play();
+  if (promise?.catch) promise.catch(() => {
+    // A late gesture restriction isn't a file-load failure; retry on the next user action.
+    if (stageMusicElement?.error) activateSynthMusicFallback(stageMusicToken);
+  });
+}
+function activateSynthMusicFallback(token) {
+  if (token !== stageMusicToken || stageMusicMode === 'fallback') return;
+  stageMusicMode = 'fallback';
+  if (stageMusicElement) { stageMusicElement.pause(); stageMusicElement = null; }
+  if (!audioContext) initAudio();
+  musicNextTime = (audioContext?.currentTime || 0) + 0.06;
+  musicStep = 0;
+}
+function setStageMusic(world = worldMode, force = false) {
+  if (!force && stageMusicWorld === world && stageMusicElement) { tryPlayStageMusic(); return; }
+  const token = ++stageMusicToken;
+  if (stageMusicElement) { stageMusicElement.pause(); stageMusicElement.removeAttribute('src'); stageMusicElement.load(); }
+  stageMusicWorld = world; stageMusicMode = 'loading';
+  const track = new Audio(); track.preload = 'auto'; track.loop = true; track.volume = state.soundOn ? 0.74 : 0;
+  stageMusicElement = track;
+  const activateFallback = () => activateSynthMusicFallback(token);
+  track.addEventListener('canplay', () => {
+    if (token !== stageMusicToken) return;
+    stageMusicElement = track;
+    stageMusicMode = 'mp3';
+    if (state.soundOn && state.started) tryPlayStageMusic();
+  });
+  track.addEventListener('error', activateFallback, { once: true });
+  track.src = new URL(`../assets/stage${stageTrackNumber(world)}.mp3`, import.meta.url).href;
+  track.load();
+  if (state.started && state.soundOn) tryPlayStageMusic();
+  // A missing optional file can otherwise remain in a browser's loading state indefinitely.
+  setTimeout(() => { if (token === stageMusicToken && stageMusicMode === 'loading' && track.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) activateFallback(); }, 5200);
+}
 function musicTick() {
+  if (stageMusicMode !== 'fallback') return;
   if (!state.soundOn || !audioContext || audioContext.state !== 'running') return;
   const horizon = audioContext.currentTime + 0.24;
   if (musicNextTime < audioContext.currentTime) musicNextTime = audioContext.currentTime + 0.02;
@@ -1951,10 +2124,26 @@ function playBoing() {
   osc.connect(gain); gain.connect(fxBus); osc.start(t); osc.stop(t + 0.31);
   setTimeout(() => sfx(92, 0.09, 'sine', 0.18), 65);
 }
+function weatherEffectStrength(now = performance.now()) {
+  if (weather.phase === 'active') return 1;
+  if (weather.phase === 'clearing') {
+    const span = Math.max(1, weather.phaseEnds - weather.phaseStarted);
+    return THREE.MathUtils.clamp(1 - (now - weather.phaseStarted) / span, 0, 1);
+  }
+  return 0;
+}
 function updateWeatherReadout() {
-  const chip = document.querySelector('#weather-chip');
+  const chip = $('#weather-chip');
   if (!chip) return;
   const skyLabel = skyCloudiness < 0.20 ? 'clear sky' : (skyCloudiness < 0.68 ? 'scattered clouds' : 'overcast');
+  if (weather.phase === 'gathering') {
+    chip.textContent = weather.pendingKind === 'rain' ? '☁ Clouds gathering · shower approaching' : '⛅ Clouds drifting in';
+    return;
+  }
+  if (weather.phase === 'clearing') {
+    chip.textContent = weather.kind === 'rain' ? '🌦 Shower passing · skies clearing' : '🍃 Gusts easing · skies clearing';
+    return;
+  }
   if (worldMode === 'water') {
     chip.textContent = seaCurrent.active ? `🫧 Bubbly current · ${skyLabel} above` : `🌊 ${skyLabel} above`;
     return;
@@ -1966,67 +2155,89 @@ function updateWeatherReadout() {
   else if (skyCloudiness < 0.68) chip.textContent = '⛅ Scattered clouds';
   else chip.textContent = '☁ Overcast';
 }
-function updateWeatherAudio() {
+function updateWeatherAudio(nowMs = performance.now()) {
   if (!audioContext) return;
-  const now = audioContext.currentTime;
-  if (rainNoiseGain) rainNoiseGain.gain.setTargetAtTime(weather.kind === 'rain' ? 0.19 : 0, now, 0.5);
-  if (windNoiseGain) windNoiseGain.gain.setTargetAtTime(weather.kind === 'wind' ? 0.22 : 0, now, 0.65);
+  const audioNow = audioContext.currentTime;
+  const strength = weatherEffectStrength(nowMs);
+  if (rainNoiseGain) rainNoiseGain.gain.setTargetAtTime(weather.kind === 'rain' ? 0.19 * strength : 0, audioNow, 0.65);
+  if (windNoiseGain) windNoiseGain.gain.setTargetAtTime(weather.kind === 'wind' ? 0.22 * strength : 0, audioNow, 0.75);
 }
 function setWeather(kind, now) {
-  weather.kind = kind;
   if (kind === 'clear') {
-    weather.until = 0; weather.windX = 0; weather.windZ = 0;
-    weather.nextAt = now + (worldMode === 'mountain' ? 5500 + rand() * 8500 : 13000 + rand() * 21000);
-  } else {
-    weather.until = now + 14000 + rand() * 9000;
-    if (kind === 'wind') {
-      const angle = rand() * Math.PI * 2;
-      weather.windX = Math.cos(angle); weather.windZ = Math.sin(angle);
-    } else {
-      weather.windX = 0.22 * Math.cos(rand() * Math.PI * 2); weather.windZ = 0.22 * Math.sin(rand() * Math.PI * 2);
+    if (weather.phase === 'clear') {
+      weather.kind = 'clear'; weather.pendingKind = null; targetSkyCloudiness = 0.035 + rand() * 0.10;
+      weather.nextAt = now + 28000 + rand() * 30000;
+      skyMoodName = 'clearing skies'; updateWeatherReadout(); updateWeatherAudio(now); return;
     }
+    if (weather.phase === 'clearing') return;
+    weather.phase = 'clearing'; weather.phaseStarted = now; weather.phaseEnds = now + 23000;
+    weather.pendingKind = null; targetSkyCloudiness = 0.035 + rand() * 0.10; skyMoodName = 'clouds gradually clearing';
+    nextSkyMoodAt = weather.phaseEnds + 45000 + rand() * 25000;
+    updateWeatherReadout(); updateWeatherAudio(now); return;
   }
-  rainLines.visible = kind === 'rain' && state.started && !state.paused;
-  for (const leaf of windLeaves) leaf.visible = kind === 'wind' && worldMode !== 'water' && worldMode !== 'mountain' && state.started && !state.paused;
-  // Couple the weather effect to the sky texture immediately rather than waiting for the next clock tick.
-  if (weatherInitialized) chooseSkyMood(now);
-  updateWeatherReadout();
-  updateWeatherAudio();
-  if (state.started && !state.paused && kind !== 'clear') toast(kind === 'rain' ? (worldMode === 'mountain' ? 'A cool ridge shower!' : 'A little meadow shower!') : (worldMode === 'mountain' ? 'A strong ridge gust is sweeping across the trail!' : (worldMode === 'bridge' ? 'A breezy canopy gust!' : 'A meadow gust is stirring the grass!')));
+  weather.phase = 'gathering'; weather.kind = 'clear'; weather.pendingKind = kind;
+  weather.phaseStarted = now; weather.phaseEnds = now + (kind === 'rain' ? 27000 : 22000); weather.until = 0;
+  weather.windCloudTarget = rand() < 0.48 ? 0.17 + rand() * 0.15 : 0.35 + rand() * 0.20;
+  targetSkyCloudiness = kind === 'rain' ? 0.90 + rand() * 0.06 : weather.windCloudTarget;
+  if (kind === 'wind') { const angle = rand() * Math.PI * 2; weather.windX = Math.cos(angle); weather.windZ = Math.sin(angle); }
+  else { const angle = rand() * Math.PI * 2; weather.windX = 0.18 * Math.cos(angle); weather.windZ = 0.18 * Math.sin(angle); }
+  skyMoodName = kind === 'rain' ? 'clouds gathering before rain' : 'wind-blown clouds gathering';
+  rainLines.visible = false; for (const leaf of windLeaves) leaf.visible = false;
+  nextSkyMoodAt = weather.phaseEnds + 45000 + rand() * 30000;
+  updateWeatherReadout(); updateWeatherAudio(now);
+}
+function updateWeatherPhase(now) {
+  if (!state.started || state.paused || state.finale.active) return;
+  if (weather.phase === 'clear' && now >= weather.nextAt) {
+    setWeather(worldMode === 'mountain' ? (rand() < 0.78 ? 'wind' : 'rain') : (rand() < 0.38 ? 'rain' : 'wind'), now);
+  } else if (weather.phase === 'gathering' && now >= weather.phaseEnds) {
+    weather.phase = 'active'; weather.kind = weather.pendingKind || 'wind'; weather.pendingKind = null;
+    weather.phaseStarted = now; weather.until = now + (worldMode === 'mountain' ? 6500 + rand() * 4500 : 15000 + rand() * 9000);
+    if (weather.kind === 'rain') targetSkyCloudiness = 0.94 + rand() * 0.05;
+    skyMoodName = weather.kind === 'rain' ? 'rain shower' : 'windy';
+    updateWeatherReadout(); updateWeatherAudio(now);
+    toast(weather.kind === 'rain' ? (worldMode === 'mountain' ? 'A cool ridge shower!' : 'Clouds have gathered into a gentle shower.') : (worldMode === 'mountain' ? 'A strong ridge gust is sweeping across the trail!' : (worldMode === 'bridge' ? 'A breezy canopy gust!' : 'A meadow gust is stirring the grass!')));
+  } else if (weather.phase === 'active' && now >= weather.until) {
+    setWeather('clear', now);
+  } else if (weather.phase === 'clearing' && now >= weather.phaseEnds) {
+    weather.phase = 'clear'; weather.kind = 'clear'; weather.pendingKind = null;
+    weather.nextAt = now + 21000 + rand() * 26000; targetSkyCloudiness = 0.035 + rand() * 0.10;
+    skyMoodName = 'clear skies returning'; updateWeatherReadout(); updateWeatherAudio(now);
+  }
 }
 function updateWeather(dt, now) {
+  updateWeatherPhase(now);
+  const strength = weatherEffectStrength(now);
+  if (now >= lastWeatherAudioUpdate + 500) { updateWeatherAudio(now); lastWeatherAudioUpdate = now; }
   if (worldMode === 'water') {
     rainLines.visible = false; for (const leaf of windLeaves) leaf.visible = false;
-    if (rainNoiseGain && audioContext) rainNoiseGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.35);
-    if (windNoiseGain && audioContext) windNoiseGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.35);
+    if (rainNoiseGain && audioContext) rainNoiseGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.5);
+    if (windNoiseGain && audioContext) windNoiseGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.5);
     if (!state.started || state.paused || state.finale.active) return;
     if (!seaCurrent.active && now >= seaCurrent.nextAt) {
       seaCurrent.active = true; seaCurrent.until = now + 6800 + rand() * 4200;
       const angle = rand() * Math.PI * 2; seaCurrent.x = Math.cos(angle); seaCurrent.z = Math.sin(angle); seaCurrent.strength = 3.8 + rand() * 1.6;
-      seaCurrentFx.visible = true;
-      seaCurrent.nextBubbleSound = now;
-      toast('A bubbly current is swirling through the sea!');
+      seaCurrentFx.visible = true; seaCurrent.nextBubbleSound = now;
+      updateWeatherReadout(); toast('A bubbly current is swirling through the sea!');
     } else if (seaCurrent.active && now >= seaCurrent.until) {
       seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrentFoamMaterial.opacity = 0.78; seaCurrent.nextAt = now + 19000 + rand() * 24000; seaCurrent.strength = 0;
-      toast('The sea has settled again.');
+      updateWeatherReadout(); toast('The sea has settled again.');
     }
     if (seaCurrent.active && now >= seaCurrent.nextBubbleSound) {
-      sfx(260 + rand() * 260, 0.22 + rand() * 0.23, 'sine', 0.135);
-      seaCurrent.nextBubbleSound = now + 520 + rand() * 520;
+      sfx(260 + rand() * 260, 0.22 + rand() * 0.23, 'sine', 0.135); seaCurrent.nextBubbleSound = now + 520 + rand() * 520;
     }
     return;
   }
-  if (!state.started || state.paused) {
-    rainLines.visible = false; for (const leaf of windLeaves) leaf.visible = false;
-    return;
+  if (!state.started || state.paused || state.finale.active) {
+    rainLines.visible = false; for (const leaf of windLeaves) leaf.visible = false; return;
   }
-  if (weather.kind !== 'clear' && now >= weather.until) setWeather('clear', now);
-  else if (weather.kind === 'clear' && now >= weather.nextAt) setWeather(worldMode === 'mountain' ? (rand() < 0.78 ? 'wind' : 'rain') : (rand() < 0.38 ? 'rain' : 'wind'), now);
-
-  rainLines.visible = weather.kind === 'rain';
-  for (const leaf of windLeaves) leaf.visible = weather.kind === 'wind' && worldMode !== 'mountain';
-  if (typeof mountainGustGroup !== 'undefined') mountainGustGroup.visible = worldMode === 'mountain' && weather.kind === 'wind' && state.started && !state.paused;
-  if (weather.kind === 'rain') {
+  const raining = weather.kind === 'rain' && strength > 0.015;
+  const windy = weather.kind === 'wind' && strength > 0.015;
+  rainLines.visible = raining;
+  rainLines.material.opacity = 0.48 * strength;
+  for (const leaf of windLeaves) leaf.visible = windy && worldMode !== 'mountain';
+  if (typeof mountainGustGroup !== 'undefined') mountainGustGroup.visible = worldMode === 'mountain' && windy;
+  if (raining) {
     rainLines.position.set(state.x, 0, state.z);
     for (let i = 0; i < RAIN_COUNT; i++) {
       const j = i * 6;
@@ -2039,18 +2250,18 @@ function updateWeather(dt, now) {
     }
     rainGeometry.attributes.position.needsUpdate = true;
   }
-  if (weather.kind === 'wind') {
+  if (windy) {
     for (const leaf of windLeaves) {
-      leaf.position.x += weather.windX * dt * 7.4 + Math.sin(now * 0.001 + leaf.id) * dt * 0.75;
-      leaf.position.z += weather.windZ * dt * 7.4;
-      leaf.rotation.z += dt * (2.1 + leaf.id % 3);
+      leaf.position.x += weather.windX * dt * 7.4 * strength + Math.sin(now * 0.001 + leaf.id) * dt * 0.75;
+      leaf.position.z += weather.windZ * dt * 7.4 * strength;
+      leaf.rotation.z += dt * (2.1 + leaf.id % 3) * strength;
       if (Math.hypot(leaf.position.x - state.x, leaf.position.z - state.z) > 34) {
         leaf.position.set(state.x - weather.windX * (17 + rand() * 10) + (rand() - 0.5) * 12, 1 + rand() * 7, state.z - weather.windZ * (17 + rand() * 10) + (rand() - 0.5) * 12);
       }
     }
   }
   for (let i = 0; i < windSwayObjects.length; i++) {
-    const amount = weather.kind === 'wind' ? 0.27 : 0.018;
+    const amount = windy ? 0.018 + 0.27 * strength : 0.018;
     windSwayObjects[i].rotation.z = Math.sin(now * 0.002 + i * 0.31) * amount;
   }
 }
@@ -2062,7 +2273,11 @@ function setSound(on) {
     if (audioContext?.state === 'suspended') audioContext.resume();
     if (masterGain && audioContext) masterGain.gain.setTargetAtTime(0.94, audioContext.currentTime, 0.05);
     if (audioContext && musicNextTime < audioContext.currentTime) musicNextTime = audioContext.currentTime + 0.025;
-  } else if (masterGain && audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.05);
+    if (stageMusicElement) { stageMusicElement.volume = 0.74; tryPlayStageMusic(); }
+  } else {
+    if (masterGain && audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, 0.05);
+    if (stageMusicElement) stageMusicElement.volume = 0;
+  }
 }
 function clearHeld() {
   for (const k of Object.keys(held)) held[k] = false;
@@ -2083,10 +2298,11 @@ function sparkle(position, count = 16) {
   }
 }
 const particles = [];
+const playerCenterScratch = new THREE.Vector3();
 function updateHUD() {
   const stage = worldMode === 'water' ? 'water' : (worldMode === 'bridge' ? 'bridge' : (worldMode === 'mountain' ? 'mountain' : 'meadow'));
   const count = stage === 'water' ? state.waterMintsCollected : (stage === 'bridge' ? state.bridgeMintsCollected : (stage === 'mountain' ? state.mountainMintsCollected : state.pearls));
-  const limit = stage === 'water' ? waterMints.length : (stage === 'bridge' ? bridgeMints.length : (stage === 'mountain' ? mountainMints.length : (pearls.length + 1)));
+  const limit = stage === 'water' ? waterMints.length : (stage === 'bridge' ? bridgeMints.length : (stage === 'mountain' ? mountainMints.length : pearls.length));
   $('#pearl-count').textContent = String(count);
   const pearlLimit = $('#pearl-limit'); if (pearlLimit) pearlLimit.textContent = `/ ${limit}`;
   const pearlIcon = document.querySelector('.pearls-stat .stat-icon'); if (pearlIcon) pearlIcon.textContent = stage === 'water' ? '❋' : (stage === 'bridge' ? '◉' : (stage === 'mountain' ? '❄' : '✧'));
@@ -2241,10 +2457,33 @@ function advanceDialogue() {
 function jumpOrInteract() {
   if (!state.started || state.paused || state.finale.active) return false;
   if (state.activeFriend) { advanceDialogue(); return false; }
+  const now = performance.now();
+  const supportY = playerSupportBelow(state.x, state.z, state.y);
+  // In Water World, each fresh press while airborne consumes the next jump in a triple-jump chain.
+  if (worldMode === 'water' && state.y > supportY + 0.28 && state.waterJumpsUsed < 3) {
+    state.waterJumpsUsed++;
+    state.vy = state.waterJumpsUsed === 2 ? 7.8 : 7.1;
+    spawnWaterJumpBubbles();
+    sfx(state.waterJumpsUsed === 2 ? 620 : 760, 0.095, 'sine', 0.075);
+    toast(state.waterJumpsUsed === 2 ? 'Double jump!' : 'Triple jump!');
+    return true;
+  }
   if (nearestFriend()) { talkToNearest(); return false; }
+  const trampoline = findTrampolineAt(state.x, state.z);
+  if (trampoline && now < state.trampolineReadyUntil) {
+    state.vy = 29.5;
+    state.trampolineReadyUntil = 0;
+    state.trampolineLaunchUntil = now + 4700;
+    trampoline.lastBounceAt = now;
+    sfx(260, 0.13, 'triangle', 0.19); setTimeout(() => sfx(780, 0.22, 'sine', 0.20), 90); setTimeout(() => sfx(1160, 0.24, 'triangle', 0.15), 175);
+    toast('HUGE JUMP! Wheeeee!');
+    return true;
+  }
   held.jump = true;
-  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : (worldMode === 'mountain' ? mountainSupportBelow(state.x,state.z,state.y) : 0);
-  if (state.y <= supportY + 0.025 && state.vy <= 0) state.vy = performance.now() < state.highJumpUntil ? 14.6 : 7.5;
+  if (state.y <= supportY + 0.025 && state.vy <= 0) {
+    state.vy = now < state.highJumpUntil ? 14.6 : 7.5;
+    if (worldMode === 'water') { state.waterJumpsUsed = 1; spawnWaterJumpBubbles(); spawnSandPuff(); }
+  }
   sfx(420, 0.07, 'sine', 0.035);
   return true;
 }
@@ -2277,12 +2516,12 @@ function enterWaterWorld(now) {
   for (const pearl of pearls) { pearl.collected = true; pearl.group.visible = false; }
   state.stageAwaitingTap = true; state.paused = true;
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Dive into the Water World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
-  state.friendsMet = 0;
+  state.friendsMet = 0; state.waterJumpsUsed = 0; state.trampolineReadyUntil = 0; state.trampolineLaunchUntil = 0;
   for (const friend of friends) friend.met = false;
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
   for (const obj of [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects]) obj.visible = false;
   for (const obstacle of obstacles) obstacle.group.visible = false;
-  waterWorld.visible = true; bridgeWorld.visible = false; mountainWorld.visible = false;
+  waterWorld.visible = true; bridgeWorld.visible = false; mountainWorld.visible = false; underwaterBubbleMesh.visible = true;
   skyDome.visible = true; sun.visible = false; moonLight.visible = true; if (moonMesh) moonMesh.visible = false;
   $('#pearls-stat-label')?.replaceChildren(document.createTextNode('SEA MINTS'));
   const brandEyebrow = document.querySelector('.brand-copy .eyebrow'); if (brandEyebrow) brandEyebrow.textContent = 'WATER WORLD';
@@ -2300,13 +2539,16 @@ function enterWaterWorld(now) {
     friend.bobble.group.traverse(obj => { if (obj.isMesh && obj.material?.color) obj.material.color.set('#aaf5ff'); });
   }
   seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.nextAt = now + 14000 + rand() * 9000;
-  setWeather('clear', now); applyLocalTime(); updateWeatherReadout();
+  setWeather('clear', now); applyLocalTime(); updateWeatherReadout(); setStageMusic('water');
   const hint = document.querySelector('.world-hint span:last-child'); if (hint) hint.textContent = 'The Water World · follow bubbles and explore';
   const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'WATER WORLD MAP';
   $('#finale-kicker').textContent = 'WELCOME BELOW THE WAVES';
   $('#finale-title').textContent = 'The Water World';
-  $('#finale-subtitle').textContent = 'The whole ocean is yours to explore.';
+  $('#finale-subtitle').textContent = 'Collect 25 Seafoam Mints to unlock Bridge World. There are 30 to find, so you can leave a few behind.';
+  $('#stage-goal').textContent = 'SEAFOAM MINTS · Collect 25 of 30 to progress';
   sfx(330, 0.45, 'sine', 0.11); setTimeout(() => sfx(440, 0.32, 'sine', 0.08), 170);
+  // Replays carry doubled mint pools forward, activating the next world's fresh pool on arrival.
+  if (replayMode) { setReplayCollectibleVisibility('water'); updateHUD(); }
 }
 function enterBridgeWorld(now) {
   if (worldMode === 'bridge') return;
@@ -2318,13 +2560,13 @@ function enterBridgeWorld(now) {
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Explore Bridge World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
   const spawnPlatform = bridgePlatforms[0];
   state.x = spawnPlatform.x; state.y = spawnPlatform.y; state.z = spawnPlatform.z; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI;
-  state.highJumpUntil = 0; state.highJumpWasActive = false; state.bridgeMintsCollected = 0; state.bridgeStageComplete = false;
+  state.highJumpUntil = 0; state.highJumpWasActive = false; state.waterJumpsUsed = 0; state.bridgeMintsCollected = 0; state.bridgeStageComplete = false;
   if (player.userData.cherryMesh) player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor);
   state.friendsMet = 0;
   const meadowObjects = [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects];
   for (const obj of meadowObjects) obj.visible = false;
   for (const obstacle of obstacles) obstacle.group.visible = false;
-  waterWorld.visible = false; bridgeWorld.visible = true; mountainWorld.visible = false; seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.strength = 0;
+  waterWorld.visible = false; bridgeWorld.visible = true; mountainWorld.visible = false; underwaterBubbleMesh.visible = false; seaCurrent.active = false; seaCurrentFx.visible = false; seaCurrent.strength = 0;
   skyDome.visible = true; sun.visible = true; moonLight.visible = true;
   if (moonMesh) moonMesh.visible = false;
   for (const item of decorBubbles) item.group.visible = false;
@@ -2359,12 +2601,14 @@ function enterBridgeWorld(now) {
   const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'BRIDGE WORLD MAP';
   $('#finale-kicker').textContent = 'WELCOME TO THE CANOPY';
   $('#finale-title').textContent = 'Bridge World';
-  $('#finale-subtitle').textContent = 'Stacked timber bridges, dangling ivy, and mint-hole jump boosts await above the forest.';
+  $('#finale-subtitle').textContent = 'Collect 30 Bridge Mints to reach Blue Ridge Mountain. There are 36 across the bridges, so you can leave a few behind.';
+  $('#stage-goal').textContent = 'BRIDGE MINTS · Collect 30 of 36 to progress';
   scene.fog = new THREE.Fog('#8aab8c', 100, 265);
   hemi.color.set('#e4f4d7'); hemi.groundColor.set('#29442e'); fillLight.color.set('#c8e6ba');
   shadow.material.color.set('#223c28'); shadow.material.opacity = 0.29;
-  setWeather('clear', now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout();
+  setWeather('clear', now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout(); setStageMusic('bridge');
   sfx(392, 0.3, 'sine', 0.12); setTimeout(() => sfx(523, 0.32, 'triangle', 0.1), 145); setTimeout(() => sfx(659, 0.42, 'sine', 0.12), 300);
+  if (replayMode) { setReplayCollectibleVisibility('bridge'); updateHUD(); }
 }
 
 
@@ -2375,14 +2619,14 @@ function enterMountainWorld(now) {
   for(const mint of bridgeMints){mint.collected=true;mint.group.visible=false;}
   state.stageAwaitingTap=true; state.paused=true;
   const arrivalButton=$('#stage-continue-button'); arrivalButton.innerHTML='Climb Blue Ridge Mountain <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
-  state.mountainMintsCollected=0; state.bridgeStageComplete=false; state.highJumpUntil=0; state.highJumpWasActive=false;
+  state.mountainMintsCollected=0; state.bridgeStageComplete=false; state.waterJumpsUsed=0; state.highJumpUntil=0; state.highJumpWasActive=false;
   if(player.userData.cherryMesh){player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor); if(player.userData.cherryMesh.material.emissive)player.userData.cherryMesh.material.emissiveIntensity=0;}
   const start=mountainTrailNodes[0]; state.x=start.x; state.y=start.y; state.z=start.z; state.vx=state.vy=state.vz=0; state.yaw=Math.PI;
   state.friendsMet=0;
   const meadowObjects=[meadowBase,meadow,meadowBlades,mossPatches,stoneInstances,pebbleInstances,petalMesh,flowerCenterMesh,flowerStemMesh,safetyGround,grassBlades,...landDecorationObjects,...landBoundaryObjects];
   for(const obj of meadowObjects)obj.visible=false;
   for(const obstacle of obstacles)obstacle.group.visible=false;
-  waterWorld.visible=false; bridgeWorld.visible=false; mountainWorld.visible=true; seaCurrent.active=false; seaCurrentFx.visible=false; seaCurrent.strength=0;
+  waterWorld.visible=false; bridgeWorld.visible=false; mountainWorld.visible=true; underwaterBubbleMesh.visible=false; seaCurrent.active=false; seaCurrentFx.visible=false; seaCurrent.strength=0;
   for(const item of decorBubbles)item.group.visible=false;
   for(const friend of friends) {
     friend.met=false; friend.bobble.group.visible=false;
@@ -2397,10 +2641,105 @@ function enterMountainWorld(now) {
   const hint=document.querySelector('.world-hint span:last-child'); if(hint) hint.textContent='Blue Ridge Mountain · hike the switchbacks, hop the ledges, watch the gusts';
   const mapTitle=document.querySelector('.map-heading b'); if(mapTitle) mapTitle.textContent='BLUE RIDGE MAP';
   $('#finale-kicker').textContent='WELCOME TO BLUE RIDGE'; $('#finale-title').textContent='Blue Ridge Mountain';
-  $('#finale-subtitle').textContent='A blue mountain ridge, winding hiking paths, fresh mints, and lively gusts. Keep your footing—strong winds can tumble you back to the base.';
+  $('#finale-subtitle').textContent='Collect 35 Fresh Mints to reach the summit. There are 42 on the mountain, so you can leave a few behind. Strong gusts can tumble you back toward the base.';
+  $('#stage-goal').textContent='FRESH MINTS · Collect 35 of 42 to reach the summit';
   scene.fog=new THREE.Fog('#9eb9c8',105,285); hemi.color.set('#dcebf1'); hemi.groundColor.set('#354d5e'); fillLight.color.set('#bed9e9'); shadow.material.color.set('#243949'); shadow.material.opacity=0.32;
-  setWeather('wind',now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout();
+  setWeather('wind',now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout(); setStageMusic('mountain');
   sfx(392,0.3,'sine',0.12); setTimeout(()=>sfx(523,0.32,'triangle',0.1),145); setTimeout(()=>sfx(659,0.42,'sine',0.12),300);
+  if (replayMode) { setReplayCollectibleVisibility('mountain'); updateHUD(); }
+}
+
+function createReplayMintCopies() {
+  if (replayMintPoolsExpanded) return;
+  replayMintPoolsExpanded = true;
+  const cloneSet = (items, parent, kind) => {
+    const originals = items.slice();
+    originals.forEach((item, i) => {
+      const copyGroup = item.group.clone(true);
+      const originalPos = item.group.position;
+      const angle = i * 2.399963229728653;
+      const radius = kind === 'meadow' ? 3.8 : (kind === 'water' ? 3.2 : (kind === 'bridge' ? 1.18 : 1.22));
+      const x = THREE.MathUtils.clamp(item.x + Math.cos(angle) * radius, -96, 96);
+      const z = THREE.MathUtils.clamp(item.z + Math.sin(angle) * radius, -96, 96);
+      copyGroup.position.set(x, originalPos.y, z); copyGroup.visible = false; parent.add(copyGroup);
+      const copy = { ...item, group: copyGroup, x, z, phase: (item.phase || 0) + 1.414 + i * 0.031, collected: false };
+      if (kind === 'meadow') copy.y = originalPos.y;
+      items.push(copy);
+    });
+  };
+  cloneSet(pearls, scene, 'meadow');
+  cloneSet(waterMints, waterWorld, 'water');
+  cloneSet(bridgeMints, bridgeWorld, 'bridge');
+  cloneSet(mountainMints, mountainWorld, 'mountain');
+}
+function setReplayCollectibleVisibility(stage) {
+  const entries = [
+    ['meadow', pearls], ['water', waterMints], ['bridge', bridgeMints], ['mountain', mountainMints],
+  ];
+  for (const [key, list] of entries) for (const mint of list) {
+    mint.collected = key !== stage;
+    mint.group.visible = key === stage;
+  }
+  state.pearls = 0; state.waterMintsCollected = 0; state.bridgeMintsCollected = 0; state.mountainMintsCollected = 0;
+  const required = stage === 'meadow' ? MEADOW_MINT_REQUIREMENT : (stage === 'water' ? WATER_MINT_REQUIREMENT : (stage === 'bridge' ? BRIDGE_MINT_REQUIREMENT : MOUNTAIN_MINT_REQUIREMENT));
+  const available = entries.find(([key]) => key === stage)[1].length;
+  const label = stage === 'meadow' ? 'FIZZ MINTS' : (stage === 'water' ? 'SEA MINTS' : (stage === 'bridge' ? 'BRIDGE MINTS' : 'FRESH MINTS'));
+  $('#pearls-stat-label')?.replaceChildren(document.createTextNode(label));
+  $('#stage-goal').textContent = `${label} · Collect ${required} of ${available} to progress`;
+  $('#finale-subtitle').textContent = `Replay mode has ${available} mints available. Collect ${required} to clear this world; your collected count starts at zero.`;
+}
+function launchReplayStage(stage) {
+  createReplayMintCopies();
+  closeDialogue(); clearHeld();
+  state.started = true; state.paused = false; state.finale.active = false; state.stageAwaitingTap = false;
+  state.friendsMet = 0; state.score = 0; state.elapsed = 0; state.mintGiftClaimed = false;
+  state.activeFriend = null; state.activeDialogueLines = null; state.waterJumpsUsed = 0;
+  state.vx = state.vy = state.vz = 0; state.knockbackUntil = 0; state.highJumpUntil = 0; state.highJumpWasActive = false;
+  $('#stage-select-overlay').classList.add('is-hidden'); $('#finale-overlay').classList.remove('is-visible', 'waiting-for-stage-tap'); $('#pause-screen').classList.add('is-hidden');
+  touchControls.classList.remove('finale-lock', 'is-disabled'); $('#pause-toggle').disabled = false; $('#pause-toggle').textContent = 'Ⅱ';
+  replayMode = true;
+  const now = performance.now();
+  if (stage === 'water') { worldMode = 'mountain'; enterWaterWorld(now); }
+  else if (stage === 'bridge') { worldMode = 'water'; enterBridgeWorld(now); }
+  else if (stage === 'mountain') { worldMode = 'bridge'; enterMountainWorld(now); }
+  else {
+    worldMode = 'meadow';
+    for (const obj of [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects]) obj.visible = true;
+    for (const obstacle of obstacles) obstacle.group.visible = true;
+    waterWorld.visible = false; bridgeWorld.visible = false; mountainWorld.visible = false; underwaterBubbleMesh.visible = false;
+    for (const friend of friends) {
+      const spec = friendSpecs.find(item => item.name === friend.name);
+      friend.x = spec.x; friend.z = spec.z; friend.worldFloorY = 0; friend.met = false;
+      friend.slug.position.set(friend.x, 0, friend.z); friend.slug.rotation.y = Math.PI;
+      friend.nameSprite.position.set(friend.x, 4.05, friend.z); friend.bobble.group.visible = false;
+    }
+    for (const item of decorBubbles) item.group.visible = false;
+    const eyebrow = document.querySelector('.brand-copy .eyebrow'); if (eyebrow) eyebrow.textContent = 'SOFT LITTLE MEADOW';
+    const hint = document.querySelector('.world-hint span:last-child'); if (hint) hint.textContent = 'The Meadow · wander, bounce, and find fizzy pearls';
+    const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'MEADOW MAP';
+    scene.fog = new THREE.Fog('#bfece1', 95, 250); hemi.color.set('#e8fff7'); hemi.groundColor.set('#548d7a'); fillLight.color.set('#b7fff0');
+    setWeather('clear', now); applyLocalTime();
+  }
+  setReplayCollectibleVisibility(stage);
+  if (stage === 'meadow') { state.x = 0; state.y = 0; state.z = 12; state.yaw = Math.PI; }
+  if (stage === 'water') {
+    state.x = 0; state.y = 0; state.z = 12; state.yaw = Math.PI;
+    for (const friend of friends) {
+      const spec = friendSpecs.find(item => item.name === friend.name);
+      friend.x = spec.x; friend.z = spec.z; friend.worldFloorY = 0; friend.met = false;
+      friend.slug.position.set(friend.x, 0, friend.z); friend.slug.rotation.y = Math.atan2(state.x - friend.x, state.z - friend.z);
+      friend.nameSprite.position.set(friend.x, 4.05, friend.z); friend.bobble.y = 3.5; friend.bobble.group.position.set(friend.x + 1.4, 3.5, friend.z); friend.bobble.group.visible = true;
+    }
+  }
+  if (stage === 'bridge') { const spawn = bridgePlatforms[0]; state.x = spawn.x; state.y = spawn.y; state.z = spawn.z; state.yaw = Math.PI; }
+  if (stage === 'mountain') { const start = mountainTrailNodes[0]; state.x = start.x; state.y = start.y; state.z = start.z; state.yaw = Math.PI; }
+  state.vx = state.vy = state.vz = 0; state.waterJumpsUsed = 0; state.stageAwaitingTap = false; state.paused = false;
+  if (stageMusicWorld === worldMode && stageMusicElement) { try { stageMusicElement.currentTime = 0; } catch {} tryPlayStageMusic(); }
+  else setStageMusic(worldMode, true);
+  updateHUD(); drawMinimap(); refreshPrompt();
+}
+for (const button of document.querySelectorAll('[data-replay-stage]')) {
+  button.addEventListener('click', () => launchReplayStage(button.dataset.replayStage));
 }
 
 function updateFizzFinale(now) {
@@ -2450,13 +2789,24 @@ function updateFizzFinale(now) {
     camera.fov = window.innerWidth < 650 ? 59 : 55; camera.updateProjectionMatrix();
     touchControls.classList.remove('finale-lock'); $('#pause-toggle').disabled = false;
     if (state.stageAwaitingTap) $('#stage-continue-button').classList.remove('is-hidden');
+    if (f.targetWorld === 'complete') {
+      state.paused = true; touchControls.classList.add('finale-lock'); $('#pause-toggle').disabled = true;
+      $('#stage-select-overlay').classList.remove('is-hidden');
+      createReplayMintCopies();
+      const listMap = { meadow: pearls.length, water: waterMints.length, bridge: bridgeMints.length, mountain: mountainMints.length };
+      for (const button of document.querySelectorAll('[data-replay-stage]')) {
+        const key = button.dataset.replayStage;
+        const count = listMap[key];
+        button.querySelector('small').textContent = `${count} mints available · counter resets`;
+      }
+    }
     clearHeld(); refreshPrompt(); drawMinimap();
   }
 }
 function collectPearl(pearl) {
   if (pearl.collected || state.finale.active) return;
   pearl.collected = true; pearl.group.visible = false; state.pearls++; state.score += 25;
-  sparkle(new THREE.Vector3(pearl.x, pearl.y, pearl.z), state.pearls === pearls.length ? 36 : 10);
+  sparkle(new THREE.Vector3(pearl.x, pearl.y, pearl.z), state.pearls >= MEADOW_MINT_REQUIREMENT ? 36 : 10);
   sfx(960, 0.1, 'sine', 0.12); setTimeout(() => sfx(1240, 0.12, 'sine', 0.09), 45);
   updateHUD();
   if (state.pearls >= MEADOW_MINT_REQUIREMENT) startFizzFinale();
@@ -2569,6 +2919,7 @@ function flashObstacle(o, now) {
   });
 }
 function updateObstacleMotion(dt, now) {
+  if (worldMode !== 'meadow') return;
   for (const o of obstacles) {
     // Boing blocks are inert and fixed until the player collides with them. Only hit impulses move them.
     o.bumpVX *= Math.exp(-dt * 5.2); o.bumpVZ *= Math.exp(-dt * 5.2);
@@ -2642,6 +2993,8 @@ function resolveObstacleCollisions(oldX, oldZ, now) {
 }
 
 function updateMovableProps(dt) {
+  if (worldMode !== 'meadow') return;
+  if (worldMode !== 'meadow') return;
   if (worldMode !== 'meadow') return;
   const spring = Math.exp(-dt * 4.8), rockDrag = Math.exp(-dt * 1.15);
   for (const prop of movableProps) {
@@ -2731,13 +3084,20 @@ function bridgeSupportBelow(x, z, y) {
   }
   return support;
 }
+function playerSupportBelow(x, z, y) {
+  if (worldMode === 'bridge') return bridgeSupportBelow(x, z, y);
+  if (worldMode === 'mountain') return Math.max(mountainSupportBelow(x, z, y), trampolineSupportBelow(x, z, y));
+  if (worldMode === 'meadow') return trampolineSupportBelow(x, z, y);
+  return 0;
+}
 function updatePlayer(dt, now) {
   const ix = (held.right ? 1 : 0) - (held.left ? 1 : 0);
   const iz = (held.back ? 1 : 0) - (held.forward ? 1 : 0);
   const oldX = state.x, oldZ = state.z, oldY = state.y;
   const planarLen = Math.hypot(ix, iz) || 1;
   const speed = 8.8;
-  const windDrift = worldMode === 'mountain' && weather.kind === 'wind' ? 8.2 : ((worldMode !== 'water' && weather.kind === 'wind') ? 2.65 : 0);
+  const windStrength = weatherEffectStrength(now);
+  const windDrift = worldMode === 'mountain' && weather.kind === 'wind' ? 8.2 * windStrength : ((worldMode !== 'water' && weather.kind === 'wind') ? 2.65 * windStrength : 0);
   const seaPush = worldMode === 'water' && seaCurrent.active ? seaCurrent.strength : 0;
   const pushX = worldMode === 'water' ? seaCurrent.x * seaPush : weather.windX * windDrift;
   const pushZ = worldMode === 'water' ? seaCurrent.z * seaPush : weather.windZ * windDrift;
@@ -2751,14 +3111,24 @@ function updatePlayer(dt, now) {
     state.vx += (targetVX - state.vx) * smooth;
     state.vz += (targetVZ - state.vz) * smooth;
   }
-  const supportY = worldMode === 'bridge' ? bridgeSupportBelow(state.x, state.z, state.y) : (worldMode === 'mountain' ? mountainSupportBelow(state.x,state.z,state.y) : 0);
+  const supportY = playerSupportBelow(state.x, state.z, state.y);
   const jumpPower = now < state.highJumpUntil ? 14.6 : 7.5;
   if (held.jump && state.y <= supportY + 0.025 && state.vy <= 0) {
     state.vy = jumpPower;
-    if (worldMode === 'water') spawnSandPuff();
+    if (worldMode === 'water') { state.waterJumpsUsed = 1; spawnSandPuff(); spawnWaterJumpBubbles(); }
   }
   state.vy -= 19.2 * dt;
   state.y += state.vy * dt;
+  if (worldMode === 'meadow' || worldMode === 'mountain') {
+    const trampoline = findTrampolineAt(state.x, state.z);
+    if (trampoline && state.vy <= 0 && state.y <= trampoline.topY && oldY <= trampoline.topY + 0.62) {
+      state.y = trampoline.topY;
+      state.vy = 4.4; // gentle, automatic bobbing hops while standing on the spring surface
+      state.trampolineReadyUntil = now + 4200;
+      trampoline.lastBounceAt = now;
+      if (now - trampoline.lastSoundAt > 720) { sfx(360 + rand() * 90, 0.11, 'triangle', 0.07); trampoline.lastSoundAt = now; }
+    }
+  }
   if (worldMode === 'bridge') {
     const landing = findBridgeLanding(oldY, state.y, state.x, state.z);
     if (landing) { state.y = landing.y; if (state.vy < 0) state.vy = 0; }
@@ -2766,8 +3136,9 @@ function updatePlayer(dt, now) {
     const landing=findMountainLanding(oldY,state.y,state.x,state.z);
     if(landing){state.y=landing.y;if(state.vy<0)state.vy=0;}
   }
+  if (worldMode === 'water' && state.y <= supportY + 0.025 && state.vy <= 0) { state.y = supportY; state.vy = 0; state.waterJumpsUsed = 0; }
   if (state.y <= 0) { state.y = 0; if (state.vy < 0) state.vy = 0; }
-  const ceiling = worldMode === 'bridge' ? 34 : (worldMode === 'mountain' ? 27 : 8.2);
+  const ceiling = worldMode === 'bridge' ? 34 : (worldMode === 'mountain' ? 27 : (worldMode === 'meadow' && (now < state.trampolineLaunchUntil || state.y > 8.2) ? 40 : 8.2));
   if (state.y >= ceiling) { state.y = ceiling; if (state.vy > 0) state.vy = 0; }
   state.x = THREE.MathUtils.clamp(state.x + state.vx * dt, -103, 103);
   state.z = THREE.MathUtils.clamp(state.z + state.vz * dt, -103, 103);
@@ -2800,6 +3171,8 @@ function updatePlayer(dt, now) {
 }
 function updateAmbientCreatures(dt, now) {
   for (const critter of ambientCreatureRecords) {
+    // Inactive biome creatures are hidden and need no transform/gait work on mobile.
+    if (!critter.group.visible || !critter.group.parent?.visible) continue;
     const t = now * 0.001 + critter.phase;
     const dxHome = critter.homeX - critter.group.position.x;
     const dzHome = critter.homeZ - critter.group.position.z;
@@ -2828,7 +3201,8 @@ function updateAmbientCreatures(dt, now) {
 
     const gaitRate = critter.kind === 'crab' || critter.kind === 'spider' ? 11.5 : (critter.kind === 'centipede' ? 12.5 : 9.4);
     const gait = Math.sin(t * gaitRate);
-    const windFactor = (worldMode === 'mountain' && weather.kind === 'wind') ? 0.035 : ((worldMode !== 'water' && weather.kind === 'wind') ? 0.012 : 0);
+    const windStrength = weatherEffectStrength(now);
+    const windFactor = (worldMode === 'mountain' && weather.kind === 'wind') ? 0.035 * windStrength : ((worldMode !== 'water' && weather.kind === 'wind') ? 0.012 * windStrength : 0);
     critter.group.position.x += Math.sin(critter.heading) * critter.speed * dt + weather.windX * windFactor * dt;
     critter.group.position.z += Math.cos(critter.heading) * critter.speed * dt + weather.windZ * windFactor * dt;
 
@@ -2859,20 +3233,23 @@ function updateAmbientCreatures(dt, now) {
 function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
   updateWeather(dt, now);
+  updateDynamicSky(dt, now);
   if (now >= nextMinimapDraw) { drawMinimap(); nextMinimapDraw = now + 140; }
   updateObstacleMotion(dt, now);
-  if(worldMode==='mountain' && weather.kind==='wind') {
+  updateTrampolineVisuals(now);
+  if(worldMode==='mountain' && weather.kind==='wind' && weatherEffectStrength(now)>0.01) {
     mountainGustGroup.visible=state.started && !state.paused;
     for(const gust of mountainGustStreaks){const t=now*0.0014+gust.phase; gust.mesh.position.set(state.x+Math.sin(t)*gust.span+weather.windX*2.4,state.y+gust.height+Math.sin(t*1.7)*0.35,state.z+Math.cos(t*0.83)*gust.span+weather.windZ*2.4); gust.mesh.rotation.y=Math.atan2(weather.windX,weather.windZ);}
   } else mountainGustGroup.visible=false;
   updateMovableProps(dt);
   updateAmbientCreatures(dt, now);
   updateSandPuffs(dt);
+  updateWaterJumpBubbles(dt);
   if (state.finale.active) {
     updateFizzFinale(now);
   } else if (state.started && !state.paused && !state.activeFriend) {
     updatePlayer(dt, now);
-    const playerCenter = new THREE.Vector3(state.x, state.y + 1.0, state.z);
+    const playerCenter = playerCenterScratch.set(state.x, state.y + 1.0, state.z);
     if (worldMode === 'water') {
       for (const mint of waterMints) {
         if (mint.collected) continue;
@@ -2918,7 +3295,7 @@ function update(dt, now) {
     f.bobble.group.position.y = f.bobble.y + Math.sin(now * 0.0016 + f.phase) * 0.16;
     if (state.activeFriend === f) f.slug.rotation.y += 0; // Keep their face turned to the player while chatting.
   });
-  for (const item of decorBubbles) { item.group.position.y = item.y + Math.sin(now * 0.0011 + item.phase) * 0.24; item.group.visible = worldMode === 'water'; }
+  if (worldMode === 'water') for (const item of decorBubbles) { item.group.position.y = item.y + Math.sin(now * 0.0011 + item.phase) * 0.24; }
   if (worldMode === 'water') {
     for (const ripple of waterSurfaceRipples) {
       const pulse = 0.92 + 0.12 * Math.sin(now * 0.0014 + ripple.phase);
@@ -2948,26 +3325,17 @@ function update(dt, now) {
       });
     }
     for (const kelp of underwaterKelp) kelp.group.rotation.z = Math.sin(now * 0.0008 + kelp.phase) * 0.045;
-    for (const bubble of underwaterBubbles) {
-      const surge = seaCurrent.active ? 5.5 : 1.0;
-      const rise = ((bubble.baseY + now * bubble.riseSpeed * surge) % 30 + 30) % 30;
-      bubble.mesh.position.set(
-        bubble.baseX + Math.sin(now * 0.00062 + bubble.phase) * bubble.drift * surge + (seaCurrent.active ? seaCurrent.x * Math.sin(now * 0.001 + bubble.phase) * 0.85 : 0),
-        0.35 + rise,
-        bubble.baseZ + Math.cos(now * 0.00047 + bubble.phase) * bubble.drift * 0.52 + (seaCurrent.active ? seaCurrent.z * Math.cos(now * 0.0011 + bubble.phase) * 0.65 : 0),
-      );
-      const pulse = 0.90 + Math.sin(now * 0.0018 + bubble.phase) * 0.10 + (seaCurrent.active ? 0.18 : 0);
-      bubble.mesh.scale.setScalar(pulse);
-    }
+    updateUnderwaterBubbleField(now);
     underwaterSnow.rotation.y += dt * 0.008;
   }
-  for (const p of particles.slice()) {
+  for (let particleIndex = particles.length - 1; particleIndex >= 0; particleIndex--) {
+    const p = particles[particleIndex];
     p.life -= dt;
     p.v.y -= 1.9 * dt;
     p.mesh.position.addScaledVector(p.v, dt);
     p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
     p.mesh.scale.setScalar(Math.max(0.01, p.life / p.maxLife));
-    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); p.mesh.geometry.dispose(); particles.splice(particles.indexOf(p), 1); }
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); p.mesh.geometry.dispose(); particles.splice(particleIndex, 1); }
   }
   if (state.started && !state.paused && !state.activeFriend) refreshPrompt();
   skyDome.visible = true;
@@ -2984,11 +3352,11 @@ function update(dt, now) {
 // --- Menu and keyboard/touch input ----------------------------------------------------------------
 function startGame() {
   state.started = true; state.paused = false;
-  if (weather.kind === 'clear') weather.nextAt = performance.now() + 7000 + rand() * 8000;
+  if (weather.phase === 'clear') weather.nextAt = performance.now() + 32000 + rand() * 26000;
   $('#welcome-screen').classList.add('is-hidden'); $('#pause-screen').classList.add('is-hidden');
   touchControls.classList.remove('is-disabled');
   $('#pause-toggle').textContent = 'Ⅱ';
-  initAudio(); if (audioContext?.state === 'suspended') audioContext.resume(); setSound(state.soundOn); updateWeatherAudio();
+  initAudio(); if (audioContext?.state === 'suspended') audioContext.resume(); setSound(state.soundOn); setStageMusic(worldMode, true); updateWeatherAudio();
   chooseSkyMood(); applyLocalTime(); updateHUD(); drawMinimap(); refreshPrompt(); clearHeld();
 }
 function pauseGame() {
@@ -2999,6 +3367,7 @@ function pauseGame() {
 function resumeGame() {
   state.paused = false; $('#pause-screen').classList.add('is-hidden'); $('#pause-toggle').textContent = 'Ⅱ'; clearHeld();
   if (audioContext?.state === 'suspended') audioContext.resume();
+  tryPlayStageMusic();
 }
 $('#resume-button').addEventListener('click', resumeGame);
 $('#stage-continue-button').addEventListener('click', () => {
@@ -3006,7 +3375,7 @@ $('#stage-continue-button').addEventListener('click', () => {
   state.stageAwaitingTap = false; state.paused = false;
   $('#finale-overlay').classList.remove('is-visible', 'waiting-for-stage-tap'); $('#stage-continue-button').classList.add('is-hidden');
   touchControls.classList.remove('finale-lock'); clearHeld(); refreshPrompt(); updateHUD(); drawMinimap();
-  sfx(660, 0.12, 'triangle', 0.12);
+  sfx(660, 0.12, 'triangle', 0.12); tryPlayStageMusic();
 });
 $('#restart-button').addEventListener('click', () => { closeDialogue(); state.x = 0; state.y = 0; state.z = 12; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI; state.started = true; state.paused = false; $('#pause-screen').classList.add('is-hidden'); clearHeld(); });
 $('#pause-toggle').addEventListener('click', () => state.paused ? resumeGame() : pauseGame());
@@ -3071,6 +3440,8 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) clear
 
 function frame(now) {
   const dt = Math.min((now - (frame.last || now)) / 1000, 0.04); frame.last = now;
+  if (document.hidden) { frame.last = now; requestAnimationFrame(frame); return; }
+  if (now - lastShadowRefresh >= 25) { renderer.shadowMap.needsUpdate = true; lastShadowRefresh = now; }
   update(dt, now); renderer.render(scene, camera); requestAnimationFrame(frame);
 }
 function resize() {
