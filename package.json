@@ -6,6 +6,6 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "check": "node --check src/main.js && node --check scripts/build.mjs && node --check scripts/serve.mjs"
+    "check": "node --check src/main.js && node --check src/magnet-physics.js && node --check scripts/build.mjs && node --check scripts/serve.mjs"
   }
 }

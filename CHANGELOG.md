@@ -1,3 +1,20 @@
+## 2026-10-17 — Magnet attraction and shadow correction
+- Fixed magnet behavior: when active, mints inside its retained 1/3 influence radius now use a smaller, vertical-aware catch radius, so they visibly move toward the player instead of instantly triggering the normal larger collection sphere.
+- Magnetic movement uses world-space distance and transforms back into each mint's parent-local coordinate system before updating position.
+- Restored frame-synchronous shadow-map updates. The previous `autoUpdate = false` plus manual refresh at 72 ms (touch) / 34 ms (desktop) was the reason dynamic shadows could lag behind the character/props; standard `autoUpdate = true` is restored while retaining the existing PCF soft shadows and map resolutions.
+
+## October 17, 2026 — Restore original opacity per UI component
+- Removed the accidental global rule that forced every information panel to an opaque background.
+- Restored the original background values component-by-component: HUD panels 76%, world hint 63%, broadcast clock 46%, minimap panel 78%, weather chip 13%, welcome/pause cards 90%, finale card 74%/64%, talk prompt 92%, and the translucent fullscreen callout.
+- Kept the dialogue card at its pre-existing 96% cream fill; only the mobile joystick and action controls retain the separately requested extra transparency.
+- Updated the build assertions to enforce original per-component opacity and fail if the global opaque-panel override returns.
+
+## October 17, 2026 — Keep dialogue readable and quiet repetitive mint messages
+- Kept the speech panel at its existing 36% opacity. Improved text contrast with a fine light outline, paint-order control, and a multi-direction shadow so the letters remain legible over both light and dark 3D scenery without increasing the panel opacity.
+- The `stage-goal` requirement pill is hidden only during the level-clear celebration, so it no longer repeats the amount required to collect. It reappears on the next world's arrival card.
+- Added per-stage mint-collection timestamps. Mint pickup toasts (including Berry's saved mint) appear only when at least 20 seconds have passed since the previous mint pickup in that stage; pickups, sounds, counters, and progression continue normally when the toast is suppressed.
+- Added build assertions for text outline/contrast, the translucent panel value, clear-card goal hiding/restoration, and the 20-second per-stage message throttle.
+
 # Changelog
 
 ## October 17, 2026 — Make stage-clear continuation clickable and add stage magnets
@@ -214,3 +231,36 @@
 - Marked Blue Ridge skyline ridges and their snow caps as background mountain scenery, exempted them from distance-based stage clipping, and disabled frustum culling on these skyline elements so they remain in view as the player climbs. Nearby trail ramps, rocks, and props retain their separate clipping rules.
 - Moved each stage's hidden magnet into a peripheral nook away from its main mint trail or bridge decks, reduced its size and glow, and cut its attraction radius to 5.2 world units on land / 5.8 underwater (about one-third of the previous reach). Vertical reach and pull speed were reduced too.
 - Added build checks for the corrected welcome mint counts, uncullable background mountains, off-route magnet placement, and the reduced magnet range.
+
+
+## October 17, 2026 — Transparent touch/dialogue UI and start fullscreen request
+- Reduced mobile movement-pad and jump-button surface opacity so the world is more visible through controls while keeping button labels and the joystick center readable.
+- Made friend dialogue a light glass layer (36% fill opacity, subtle blur) with darker high-contrast text; avatar, close, continue, and nearby-talk prompt surfaces are also more transparent.
+- Added a prominent “BEST ON MOBILE · Full screen gives you more room” callout above the start button. The Start click also requests native fullscreen during the user gesture when supported, falling back to the app's immersive viewport layout when unavailable or denied.
+- Added build regression checks for the welcome callout order, fullscreen-on-start event path, fallback, transparent mobile controls, and translucent dialogue readability.
+
+## Magnet range and Blue Ridge visibility correction (2026-10-17)
+- Reduced active magnet attraction to exactly one-third of the prior in-source ranges: land 5.2 → 1.73 units, water 5.8 → 1.93 units, and vertical allowance 4.2 → 1.4 units.
+- Reduced magnet models to 64% scale, dimmed their aura, and kept them hidden until the player is within 18 units on touch devices or 22 on desktop.
+- Moved magnets to peripheral ground-level nooks away from normal mint trails. The Blue Ridge magnet is over 65 units from the hiking trail and is only revealed when the player explores nearby.
+- Blue Ridge ramps, junction plates, outcrop rocks, ridge peaks, and snow caps no longer enter the stage distance-culling list. The distant ridge/snow materials disable fog fade, and the background peaks/caps explicitly disable frustum culling so the skyline remains visible throughout the mountain stage.
+- Added release assertions for one-third magnet ranges, proximity-based reveal, the Blue Ridge magnet's trail clearance, and non-clipped mountain geometry.
+
+## Dialogue layout correction
+
+- Restored the original opaque cream dialogue card (`rgba(255,254,247,.96)`) and original solid avatar/close/continue button colours. Removed the light outline/shadow treatment that had made dialogue text look wrong.
+- In mobile landscape, anchored the dialogue card to the bottom-centre, within the horizontal gap between the movement joystick and jump/talk control. The width scales with the viewport while preserving safe-area spacing and scrollability for longer lines.
+- Kept translucent touch controls unchanged.
+
+
+## UI opacity and magnet visibility restoration (2026-10-17)
+- Made all information-bearing UI boxes opaque: HUD surfaces, world hint, clock/weather, minimap panel, toast, welcome and pause cards, stage goals/cards, dialogue, talk prompt, and magnet status. The only deliberately translucent surfaces are the mobile movement and action control overlays.
+- Restored magnet model scale to 1.0, raised aura opacity from 0.045 to 0.17, brightened the frame and red/blue poles, enlarged sparkle details, and made the pickup visible whenever its world is active. Off-route placements and one-third attraction range are unchanged.
+
+
+## Magnet attraction and shadow correction
+
+- Fixed the magnet’s actual movement path, not just its activation state: nearby mints now move toward the player in full 3D and their vertical pull offset persists across bobbing animation frames. Collection distance is checked in world coordinates for all four stages.
+- Added an allocation-free magnet-physics helper and build-time simulation tests: a nearby mint moves from 1.96 units away to the player, a mint directly above the player moves vertically, and a mint outside the one-third horizontal range remains unaffected.
+- Kept horizontal attraction at the requested one-third range (1.73 units on land, 1.93 underwater) while allowing enough vertical tolerance for floating mints (2.8 units).
+- Corrected the shadow projection: apply `updateProjectionMatrix()` after configuring the directional light’s orthographic camera, follow the player with a fixed sun direction, snap the target to shadow texels to reduce shimmering, and use a tighter ±38-unit shadow volume at 1536px mobile / 2048px desktop resolution.

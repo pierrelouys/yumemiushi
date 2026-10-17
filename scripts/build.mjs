@@ -1,6 +1,7 @@
 import { cp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calculateMagnetPullStep } from '../src/magnet-physics.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -143,34 +144,83 @@ if (!htmlSource.includes('id="magnet-indicator"') ||
     !/const stageMagnetPickups = \[/.test(gameSource) ||
     !/function resetStageMagnet\(stage = worldMode\)/.test(gameSource) ||
     !/function tryCollectStageMagnet\(now\)/.test(gameSource) ||
-    !/function attractMintTowardPlayer\(mint, dt\)/.test(gameSource) ||
+    !/function attractMintTowardPlayer\(mint, dt, baselineLocalY/.test(gameSource) ||
+    !/function mintDistanceMetrics\(mint, playerCenter\)/.test(gameSource) ||
+    !/calculateMagnetPullStep\(/.test(gameSource) ||
     !/state\.magnetActive = true/.test(gameSource) ||
     !/function updateStageMagnetVisuals\(now\)/.test(gameSource) ||
-    !/attractMintTowardPlayer\(pearl, dt\)/.test(gameSource) ||
-    !/attractMintTowardPlayer\(mint, dt\)/.test(gameSource) ||
+    !/const mintMetrics = mintDistanceMetrics\(pearl, playerCenter\)/.test(gameSource) ||
+    !/const mintMetrics = mintDistanceMetrics\(mint, playerCenter\)/.test(gameSource) ||
+    !/mint\.group\.updateWorldMatrix\(true, false\)/.test(gameSource) ||
+    !/mint\.group\.parent\.worldToLocal\(magnetMintNextLocalPosition\.copy\(magnetMintNextWorldPosition\)\)/.test(gameSource) ||
+    !/mint\.magnetYOffset = mint\.group\.position\.y - baselineLocalY/.test(gameSource) ||
     !/resetStageMagnet\('water'\)/.test(gameSource) ||
     !/resetStageMagnet\('bridge'\)/.test(gameSource) ||
     !/resetStageMagnet\('mountain'\)/.test(gameSource) ||
     !/resetStageMagnet\('meadow'\)/.test(gameSource)) {
-  throw new Error('All four stages must have a collectible stage-long magnet, working mint attraction, an active-state indicator, and reset-on-stage-entry behavior.');
+  throw new Error('All four stages must have a collectible stage-long magnet, working 3D attraction and world-space mint collision, a persistent pull offset, and reset-on-stage-entry behavior.');
 }
 const magnetStageList = gameSource.match(/const stageMagnetPickups = \[([\s\S]*?)\];/);
 const magnetStages = magnetStageList ? [...magnetStageList[1].matchAll(/createStageMagnet\('([a-z]+)'/g)].map(m => m[1]).sort() : [];
-const magnetPullCalls = [...gameSource.matchAll(/^\s+attractMintTowardPlayer\((?:pearl|mint), dt\);/gm)].length;
+const magnetPullCalls = [...gameSource.matchAll(/^\s+const magnetPulling = attractMintTowardPlayer\((?:pearl|mint), dt, bobY\);/gm)].length;
 if (magnetStages.join(',') !== 'bridge,meadow,mountain,water' || magnetPullCalls !== 4) {
-  throw new Error(`Exactly one hidden magnet and a mint-attraction update are required in each stage; found stages ${magnetStages.join(', ') || 'none'} and ${magnetPullCalls} attraction calls.`);
+  throw new Error(`Exactly one off-route magnet and an attraction update are required in each stage; found stages ${magnetStages.join(', ') || 'none'} and ${magnetPullCalls} attraction calls.`);
 }
 const magnetPlacementBlock = gameSource.match(/const stageMagnetPickups = \[([\s\S]*?)\];/);
-const meadowMagnet = gameSource.match(/createStageMagnet\('meadow',scene,([-\d.]+),0,([-\d.]+)\)/);
-if (!meadowMagnet || Math.hypot(Number(meadowMagnet[1]),Number(meadowMagnet[2])-12) < 90 ||
-    !magnetPlacementBlock ||
-    !magnetPlacementBlock[1].includes("createStageMagnet('water',waterWorld,85,0,-81)") ||
-    !magnetPlacementBlock[1].includes("createStageMagnet('bridge',bridgeWorld,73,0,-70)") ||
-    !magnetPlacementBlock[1].includes("createStageMagnet('mountain',mountainWorld,57,0.16,33)") ||
-    !/const radius = worldMode === 'water' \? 5\.8 : 5\.2;/.test(gameSource) ||
-    !/if \(horizontal > radius \|\| dy > 4\.2 \|\| horizontal < 0\.001\) return;/.test(gameSource) ||
-    !/opacity:0\.16,\s*depthWrite:false/.test(gameSource)) {
-  throw new Error('Stage magnets must be tucked off the primary routes and attract only nearby mints within the reduced radius.');
+if (!magnetPlacementBlock ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('meadow',scene, -96,0, 96)") ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('water',waterWorld, 99,0,-99)") ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('bridge',bridgeWorld, 82,0,-84)") ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('mountain',mountainWorld,-72,0.16,88)") ||
+    !/const MAGNET_RANGE_SCALE = 1 \/ 3;/.test(gameSource) ||
+    !/const MAGNET_LAND_RANGE = 5\.2 \* MAGNET_RANGE_SCALE;/.test(gameSource) ||
+    !/const MAGNET_WATER_RANGE = 5\.8 \* MAGNET_RANGE_SCALE;/.test(gameSource) ||
+    !/const MAGNET_VERTICAL_RANGE = 2\.8;/.test(gameSource) ||
+    !/const MAGNET_COLLECTION_RADIUS = 1\.05;/.test(gameSource) ||
+    !/function mintPickupRadius\(normalRadius, magnetPulling\)/.test(gameSource) ||
+    !/return magnetPulling \? Math\.min\(normalRadius, MAGNET_COLLECTION_RADIUS\) : normalRadius;/.test(gameSource) ||
+    !/mint\.group\.getWorldPosition\(magnetMintWorldPosition\)/.test(gameSource) ||
+    !/mint\.group\.parent\.updateWorldMatrix\(true, false\)/.test(gameSource) ||
+    !/pickup\.group\.visible = inStage;/.test(gameSource) ||
+    !/opacity:0\.17,\s*depthWrite:false/.test(gameSource) ||
+    !/group\.scale\.setScalar\(1\.0\)/.test(gameSource) ||
+    !/emissiveIntensity:0\.36/.test(gameSource)) {
+  throw new Error('Magnets must retain the one-third horizontal reach and full-size/bright visuals while using a functional 3D pull.');
+}
+// Exercise the exact magnet-physics helper used by runtime: an offset mint moves each step,
+// directly-above mints still move vertically, and mint outside the horizontal reach is untouched.
+const testMagnetOut = { x:0, y:0, z:0, inRange:false, moved:false, horizontalDistance:0, distance:0 };
+const magnetTargetTest = { x:0, y:1, z:0 };
+let movingMintTest = { x:1.45, y:2.3, z:0.2 };
+const initialMagnetDistance = Math.hypot(movingMintTest.x, movingMintTest.y - magnetTargetTest.y, movingMintTest.z);
+for (let step = 0; step < 18; step++) {
+  calculateMagnetPullStep(movingMintTest, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
+  if (!testMagnetOut.inRange) throw new Error('Magnet physics test: nearby mint incorrectly fell outside the field.');
+  if (!testMagnetOut.moved) { if (testMagnetOut.distance <= 0.03) break; throw new Error('Magnet physics test: nearby mint failed to move.'); }
+  movingMintTest = { x:testMagnetOut.x, y:testMagnetOut.y, z:testMagnetOut.z };
+}
+const finalMagnetDistance = Math.hypot(movingMintTest.x, movingMintTest.y - magnetTargetTest.y, movingMintTest.z);
+if (!(finalMagnetDistance < initialMagnetDistance * 0.30)) throw new Error(`Magnet physics test: mint failed to approach player (distance ${initialMagnetDistance.toFixed(2)} -> ${finalMagnetDistance.toFixed(2)}).`);
+calculateMagnetPullStep({x:0.01,y:2.2,z:0.01}, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
+if (!testMagnetOut.inRange || !testMagnetOut.moved || !(testMagnetOut.y < 2.2)) throw new Error('Magnet physics test: vertically aligned mint does not move toward the player.');
+calculateMagnetPullStep({x:5.2/3+0.2,y:1,z:0}, magnetTargetTest, 1/60, 5.2/3, 2.8, testMagnetOut);
+if (testMagnetOut.inRange || testMagnetOut.moved) throw new Error('Magnet physics test: horizontal reach exceeds the requested one-third range.');
+const effectiveMagnetRanges = { land: 5.2 / 3, water: 5.8 / 3, vertical: 2.8 };
+const magneticCollectionCallCount = [...gameSource.matchAll(/const pickupRadius = mintPickupRadius\(/g)].length;
+if (!(effectiveMagnetRanges.land > 1.05 && effectiveMagnetRanges.water > 1.05 && effectiveMagnetRanges.vertical > 1.05) || magneticCollectionCallCount !== 4) {
+  throw new Error('All four worlds must perform magnetic attraction and world-space mint collision checks.');
+}
+console.log(`Magnet movement simulation passed: nearby 3D distance ${initialMagnetDistance.toFixed(2)} -> ${finalMagnetDistance.toFixed(2)}; horizontal range ${effectiveMagnetRanges.land.toFixed(2)} land / ${effectiveMagnetRanges.water.toFixed(2)} water; elevated mint pulls vertically.`);
+if (!/renderer\.shadowMap\.autoUpdate = true;/.test(gameSource) || /shadowRefreshInterval|lastShadowRefresh/.test(gameSource) || !/renderer\.shadowMap\.type = THREE\.PCFSoftShadowMap;/.test(gameSource) || !/sun\.shadow\.camera\.updateProjectionMatrix\(\);/.test(gameSource) || !/scene\.add\(sun\.target\);/.test(gameSource) || !/function updateSunShadowAnchor\(\)/.test(gameSource) || !/sun\.target\.position\.set\(tx, ty, tz\)/.test(gameSource) || !/sun\.position\.set\(tx - 35, ty \+ 65, tz \+ 32\)/.test(gameSource) || !/sun\.shadow\.normalBias = 0\.025;/.test(gameSource) || !/updateSunShadowAnchor\(\);\n  musicTick\(\);/.test(gameSource)) {
+  throw new Error('Shadows must use a valid, updated orthographic projection, player-following light target, and normal PCF soft-shadow updates.');
+}
+if (!/if \(stage === 'mountain' \|\| object\.userData\?\.backgroundMountain \|\| object\.userData\?\.neverDistanceCull\) return object;/.test(gameSource) ||
+    !/const mountainBackdropRockMat = new THREE\.MeshStandardMaterial\(\{[^}]*fog: false/.test(gameSource) ||
+    !/const mountainBackdropSnowMat = new THREE\.MeshStandardMaterial\(\{[^}]*fog: false/.test(gameSource) ||
+    !/new THREE\.Mesh\(new THREE\.ConeGeometry\(r, h, 7, 2\), mountainBackdropRockMat\)/.test(gameSource) ||
+    !/new THREE\.Mesh\(new THREE\.ConeGeometry\(r \* 0\.40, h \* 0\.23, 7, 1\), mountainBackdropSnowMat\)/.test(gameSource) ||
+    !/backgroundMesh\.visible = true; backgroundMesh\.frustumCulled = false;/.test(gameSource)) {
+  throw new Error('All Blue Ridge mountain terrain must bypass distance culling and the skyline must render without fog fade.');
 }
 if (!/const UNDERWATER_BUBBLE_COUNT = 4000;/.test(gameSource) ||
     !/const UNDERWATER_DETAILED_BUBBLES = touchGpuProfile \? 300 : 760;/.test(gameSource) ||
@@ -184,8 +234,13 @@ if (!/const UNDERWATER_BUBBLE_COUNT = 4000;/.test(gameSource) ||
 if (!/const renderPixelRatioCap = touchGpuProfile \? 1\.28 : 1\.6;/.test(gameSource) ||
     !/averageFrameMs \+= \(rawFrameMs - averageFrameMs\) \* 0\.08/.test(gameSource) ||
     !/activePixelRatio - 0\.08/.test(gameSource) ||
-    !/const shadowRefreshInterval = touchGpuProfile \? 72 : 34;/.test(gameSource) ||
-    !/sun\.shadow\.mapSize\.set\(touchGpuProfile \? 1024 : 1536/.test(gameSource) ||
+    !/renderer\.shadowMap\.autoUpdate = true;/.test(gameSource) ||
+    /shadowRefreshInterval|lastShadowRefresh/.test(gameSource) ||
+    !/sun\.shadow\.mapSize\.set\(touchGpuProfile \? 1536 : 2048/.test(gameSource) ||
+    !/sun\.shadow\.camera\.left = -38;/.test(gameSource) ||
+    !/sun\.shadow\.camera\.right = 38;/.test(gameSource) ||
+    !/sun\.shadow\.camera\.top = 38;/.test(gameSource) ||
+    !/sun\.shadow\.camera\.bottom = -38;/.test(gameSource) ||
     !/BUBBLE_LOD_SORT_INTERVAL = 240/.test(gameSource) ||
     !/now - lastBubbleLodSort >= BUBBLE_LOD_SORT_INTERVAL/.test(gameSource) ||
     !/averageFrameMs > 24/.test(gameSource) ||
@@ -210,6 +265,17 @@ if (!/const mountainJunctions = mountainTrailNodes\.map\(node=>\(\{node,half:7\.
 const nodeMatch = gameSource.match(/const mountainTrailNodes = \[([\s\S]*?)\];/);
 const mountainNodes = nodeMatch ? [...nodeMatch[1].matchAll(/\{ x: ([\d.-]+), z: ([\d.-]+), y: ([\d.-]+) \}/g)].map(m=>({x:+m[1],z:+m[2],y:+m[3]})) : [];
 if (mountainNodes.length !== 9) throw new Error(`Blue Ridge needs 9 connected trail nodes; found ${mountainNodes.length}.`);
+const mountainMagnet = gameSource.match(/createStageMagnet\('mountain',mountainWorld,([-\d.]+),0\.16,([-\d.]+)\)/);
+if (!mountainMagnet) throw new Error('Blue Ridge magnet location must be explicit and verifiable.');
+const mountainMagnetPoint = { x: Number(mountainMagnet[1]), z: Number(mountainMagnet[2]) };
+function pointSegmentDistance2D(point, a, b) {
+  const dx = b.x-a.x, dz = b.z-a.z, len2 = dx*dx+dz*dz || 1;
+  const t = Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.z-a.z)*dz)/len2));
+  return Math.hypot(point.x-(a.x+dx*t),point.z-(a.z+dz*t));
+}
+const mountainMagnetTrailGap = Math.min(...mountainNodes.slice(0,-1).map((node,i)=>pointSegmentDistance2D(mountainMagnetPoint,node,mountainNodes[i+1])));
+if (mountainMagnetTrailGap < 55) throw new Error(`Blue Ridge magnet must be hidden at least 55 units from the hiking trail; found ${mountainMagnetTrailGap.toFixed(1)}.`);
+console.log(`Magnet ranges verified: horizontal ${effectiveMagnetRanges.land.toFixed(2)} land / ${effectiveMagnetRanges.water.toFixed(2)} water, vertical tolerance ${effectiveMagnetRanges.vertical.toFixed(2)}; Blue Ridge magnet is ${mountainMagnetTrailGap.toFixed(1)} units off-trail and pickups remain full-size.`);
 const mountainSegments = mountainNodes.slice(0,-1).map((a,i)=>({a,b:mountainNodes[i+1],index:i,width:13.2}));
 function simulatedMountainSurface(x,z) {
   const hits=[]; let weightedY=0,weightSum=0,closestHit=null;
@@ -252,6 +318,10 @@ if(maxLateralTrailStep>0.15) throw new Error(`Blue Ridge ramp surface has a ${ma
 const ridgeMatch = gameSource.match(/const ridgePeaks = \[([\s\S]*?)\];/);
 const ridgeRows = ridgeMatch ? [...ridgeMatch[1].matchAll(/\[([-\d.]+),([-\d.]+),([\d.]+),([\d.]+)\]/g)].map(m=>({x:+m[1],z:+m[2],r:+m[3]})) : [];
 if(ridgeRows.length<8 || !/rx:r\*1\.22, rz:r\*0\.76, topY:h-0\.8/.test(gameSource)) throw new Error('Blue Ridge rock collision must cover the visible mountain footprint.');
+for (const ridge of ridgeRows) {
+  const q = ((mountainMagnetPoint.x-ridge.x)/(ridge.r*1.22))**2 + ((mountainMagnetPoint.z-ridge.z)/(ridge.r*0.76))**2;
+  if (q < 1.03) throw new Error('Blue Ridge magnet must be reachable on the ground and outside solid mountain footprints.');
+}
 for(const seg of mountainSegments) for(let i=0;i<=60;i++) for(const off of [-6.2,0,6.2]) {
   const t=i/60,dx=seg.b.x-seg.a.x,dz=seg.b.z-seg.a.z,len=Math.hypot(dx,dz)||1;
   const x=seg.a.x+dx*t-dz/len*off,z=seg.a.z+dz*t+dx/len*off;
@@ -290,12 +360,13 @@ if (!/function splitInstancedMeshByDistance\(/.test(gameSource) ||
     !/const range = touchGpuProfile \? 30 : 42/.test(gameSource) ||
     !/const updateRange = touchGpuProfile \? 26 : 38/.test(gameSource) ||
     !/registerStageObjectCull\(group, 'bridge', 52, 70\)/.test(gameSource) ||
-    !/registerStageObjectCull\(ramp, 'mountain', 54, 72\)/.test(gameSource) ||
+    /registerStageObjectCull\(ramp, 'mountain'/.test(gameSource) ||
+    /registerStageObjectCull\(mesh, 'mountain'/.test(gameSource) ||
     /registerStageObjectCull\(ridge, 'mountain'/.test(gameSource) ||
     /registerStageObjectCull\(cap, 'mountain'/.test(gameSource) ||
-    !/ridge\.userData\.backgroundMountain = true; ridge\.frustumCulled = false/.test(gameSource) ||
-    !/cap\.userData\.backgroundMountain = true; cap\.frustumCulled = false/.test(gameSource) ||
-    !/registerStageObjectCull\(rock, 'mountain', 36, 50\)/.test(gameSource) ||
+    !/ridge\.userData\.backgroundMountain = true; ridge\.userData\.neverDistanceCull = true; ridge\.frustumCulled = false/.test(gameSource) ||
+    !/cap\.userData\.backgroundMountain = true; cap\.userData\.neverDistanceCull = true; cap\.frustumCulled = false/.test(gameSource) ||
+    /registerStageObjectCull\(rock, 'mountain'/.test(gameSource) ||
     !/registerStageObjectCull\(trunk, 'bridge', 36, 52\)/.test(gameSource)) {
   throw new Error('Distant non-target scenery must be spatially clipped while floors and mint collectibles remain available.');
 }
@@ -325,6 +396,34 @@ if (!indexSource.includes('id=\"stage-continue-button\"') || !gameSource.include
   throw new Error('New-world arrival must include a working, tappable continue button.');
 }
 
+const startClickBlock = indexSource.match(/button\.addEventListener\('click', event => \{([\s\S]*?)\n      \}\);/);
+if (!indexSource.includes('class="welcome-fullscreen-callout"') ||
+    indexSource.indexOf('welcome-fullscreen-callout') > indexSource.indexOf('id="start-button"') ||
+    !/const\s+requestFullscreenFromStartGesture\s*=/.test(indexSource) ||
+    !startClickBlock || !/requestFullscreenFromStartGesture\(\)/.test(startClickBlock[1]) ||
+    !/app\.classList\.add\('pseudo-fullscreen'\)/.test(indexSource)) {
+  throw new Error('Welcome screen must prominently offer fullscreen and request it from the Start click with a fallback.');
+}
+// Preserve each panel's original opacity. Only the mobile touch-control surfaces use the later
+// translucent treatment; panels that were already glass remain glass, while dialogue stays at
+// its original 96% cream background.
+if (!styleSource.includes('--glass: rgba(252, 255, 249, .9);') ||
+    !styleSource.includes('background: rgba(250,255,251,.76)') ||
+    !styleSource.includes('background: rgba(250,255,249,.63)') ||
+    !styleSource.includes('background: rgba(8,18,28,.46)') ||
+    !styleSource.includes('background: rgba(249,255,249,.78)') ||
+    !styleSource.includes('background: rgba(242,249,255,.13)') ||
+    !styleSource.includes('background: rgba(255,254,247,.96) !important') ||
+    !styleSource.includes('background: rgba(255,255,247,.92)') ||
+    !styleSource.includes('rgba(13,67,92,.74), rgba(3,33,59,.64)') ||
+    !styleSource.includes('rgba(255,255,255,.50), rgba(239,255,248,.23)') ||
+    !styleSource.includes('rgba(255,250,248,.70)') ||
+    styleSource.includes('/* OPAQUE INFORMATION PANELS') ||
+    styleSource.includes('background: #fafffb !important') ||
+    styleSource.includes('background: #08121c !important') ||
+    styleSource.includes('background: rgba(255,255,247,.62) !important')) {
+  throw new Error("UI must preserve each component's pre-change opacity; only mobile control overlays use the requested translucent styling.");
+}
 if (!/width: clamp\(150px, 40vh, 174px\); height: clamp\(150px, 40vh, 174px\)/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8')) ||
     !/width: clamp\(140px, 38vh, 166px\); height: clamp\(140px, 38vh, 166px\)/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8')) ||
     !/inset: auto 36px max\(12px, env\(safe-area-inset-bottom\)\) 36px/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8'))) {

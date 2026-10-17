@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { calculateMagnetPullStep } from './magnet-physics.js';
 
 // クリームソーダうみうし — a free-roaming 3D plush friendship meadow.
 // Movement is player-driven on X/Z; Y follows gravity and the shared jump action.
@@ -8,7 +9,6 @@ const $ = (selector) => document.querySelector(selector);
 const canvas = $('#game-canvas');
 const touchGpuProfile = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
 const renderPixelRatioCap = touchGpuProfile ? 1.28 : 1.6;
-const shadowRefreshInterval = touchGpuProfile ? 72 : 34;
 let activePixelRatio = Math.min(window.devicePixelRatio || 1, renderPixelRatioCap);
 const minimumAdaptivePixelRatio = Math.min(0.90, activePixelRatio);
 let averageFrameMs = 16.7;
@@ -20,6 +20,19 @@ const WATER_MINT_REQUIREMENT = 50;
 const BRIDGE_MINT_REQUIREMENT = 60;
 const MOUNTAIN_MINT_REQUIREMENT = 70;
 const MINT_CUSHION = 1.2;
+// Keep the deliberately short one-third magnet reach. When a mint is inside this reach,
+// it is pulled visibly toward the player before it can use the normal proximity pickup radius.
+const MAGNET_RANGE_SCALE = 1 / 3;
+const MAGNET_LAND_RANGE = 5.2 * MAGNET_RANGE_SCALE;
+const MAGNET_WATER_RANGE = 5.8 * MAGNET_RANGE_SCALE;
+const MAGNET_VERTICAL_RANGE = 2.8;
+const MAGNET_COLLECTION_RADIUS = 1.05;
+const magnetMintWorldPosition = new THREE.Vector3();
+const magnetMintNextWorldPosition = new THREE.Vector3();
+const magnetMintNextLocalPosition = new THREE.Vector3();
+const magnetPlayerTargetScratch = new THREE.Vector3();
+const magnetPullStepScratch = { x: 0, y: 0, z: 0, inRange: false, moved: false, horizontalDistance: 0, distance: 0 };
+const magnetDistanceScratch = { distanceSq: 0, verticalDistance: 0 };
 const MEADOW_MINT_TOTAL = Math.ceil(MEADOW_MINT_REQUIREMENT * MINT_CUSHION);
 const MEADOW_TRAMPOLINE_MINTS_PER_PAD = 11;
 const MEADOW_TRAMPOLINE_MINT_COUNT = 4 * MEADOW_TRAMPOLINE_MINTS_PER_PAD;
@@ -104,6 +117,9 @@ const stageObjectCullRecords = [];
 const stageObjectCullPosition = new THREE.Vector3();
 let lastStageObjectCull = 0;
 function registerStageObjectCull(object, stage, mobileRange = 42, desktopRange = 58) {
+  // Blue Ridge's mountain terrain and skyline are part of the persistent background.
+  // Do not distance-hide any mountain-stage object; visibility is controlled by the world group.
+  if (stage === 'mountain' || object.userData?.backgroundMountain || object.userData?.neverDistanceCull) return object;
   stageObjectCullRecords.push({ object, stage, mobileRange, desktopRange });
   return object;
 }
@@ -130,11 +146,10 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.13;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-// Keep detailed, soft shadows. Refresh at about 14 Hz on touch devices and 29 Hz on desktop;
-// the retained shadow-map resolution keeps edges soft while avoiding a full shadow render per frame.
-renderer.shadowMap.autoUpdate = false;
+// Use regular PCF soft shadows. Keep the map centered on the player and fit the projection to
+// nearby gameplay; the old unapplied/wide frustum produced muddy or missing contact shadows.
+renderer.shadowMap.autoUpdate = true;
 renderer.shadowMap.needsUpdate = true;
-let lastShadowRefresh = 0;
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 360);
 const hemi = new THREE.HemisphereLight('#f8fffc', '#69a99c', 2.0);
@@ -142,15 +157,22 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff5e8', 3.0);
 sun.position.set(-35, 65, 32);
 sun.castShadow = true;
-sun.shadow.mapSize.set(touchGpuProfile ? 1024 : 1536, touchGpuProfile ? 1024 : 1536);
-sun.shadow.camera.left = -90;
-sun.shadow.camera.right = 90;
-sun.shadow.camera.top = 90;
-sun.shadow.camera.bottom = -90;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 220;
-sun.shadow.bias = -0.0002;
+sun.shadow.mapSize.set(touchGpuProfile ? 1536 : 2048, touchGpuProfile ? 1536 : 2048);
+// The old 180 x 180 shadow frustum spread the map across the whole world, making the
+// character's contact shadows muddy and pixelated. Keep a 76-unit detail window around the
+// player instead; the sun/target pair follows the player without changing the light direction.
+sun.shadow.camera.left = -38;
+sun.shadow.camera.right = 38;
+sun.shadow.camera.top = 38;
+sun.shadow.camera.bottom = -38;
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far = 190;
+sun.shadow.bias = -0.00012;
+sun.shadow.normalBias = 0.025;
+sun.shadow.radius = 3;
+sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun);
+scene.add(sun.target);
 const fillLight = new THREE.DirectionalLight('#bafff3', 1.2);
 fillLight.position.set(25, 22, -45);
 scene.add(fillLight);
@@ -1617,7 +1639,7 @@ const seaTurtle = (() => {
   const eyeShine = new THREE.MeshBasicMaterial({ color:'#ffffff' });
   for (const side of [-1,1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.105,12,8),eyeMat); eye.position.set(side*0.56,1.18,4.17); group.add(eye);
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.035,8,6),eyeShine); shine.position.set(side*0.585,1.22,4.235); group.add(shine);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.05,10,8),eyeShine); shine.position.set(side*0.585,1.22,4.235); group.add(shine);
   }
   const tail = new THREE.Mesh(new THREE.ConeGeometry(0.32,0.9,8),skin); tail.position.set(0,0.65,-3.55); tail.rotation.x=-Math.PI/2; group.add(tail);
   return { group, flippers, heading:0, vx:0, vz:0, target:null, phase:Math.random()*6.28, topY:2.44, riderOffsetZ:-0.15 };
@@ -1847,6 +1869,11 @@ mountainGround.rotation.x = -Math.PI / 2; mountainGround.position.y = -0.08; mou
 const mountainRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.17, color: '#718da4', roughness: 1 });
 const mountainShadowRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.20, color: '#506e88', roughness: 1 });
 const mountainSnowMat = new THREE.MeshStandardMaterial({ color: '#edf3ec', roughness: 0.98, bumpMap: stoneBumpTexture, bumpScale: 0.04 });
+// The distant Blue Ridge skyline is separate from local rock materials: it ignores scene fog
+// and every distance-culling system so the mountains never dissolve into the sky or pop away.
+const mountainBackdropRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.11, color: '#718da4', roughness: 1, fog: false });
+const mountainBackdropSnowMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.035, color: '#edf3ec', roughness: 0.98, fog: false });
+const mountainBackdropObjects = [];
 // Distinct layered blue ridges form the skyline, unrelated to any real-world mountain range.
 const mountainSolidColliders = [];
 const ridgePeaks = [
@@ -1854,15 +1881,15 @@ const ridgePeaks = [
   [-96,-24,22,46],[96,-17,24,48],[-89,40,26,52],[87,42,22,43],
 ];
 for (const [x,z,r,h] of ridgePeaks) {
-  const ridge = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 2), mountainRockMat);
+  const ridge = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 2), mountainBackdropRockMat);
   ridge.position.set(x, h * 0.48 - 1.1, z); ridge.rotation.y = rand() * Math.PI; ridge.scale.set(1.22,1,0.76); ridge.castShadow = true; ridge.receiveShadow = true;
   // The skyline ridges are background scenery, not local set dressing: never distance-clip them.
-  ridge.userData.backgroundMountain = true; ridge.frustumCulled = false; mountainWorld.add(ridge);
+  ridge.userData.backgroundMountain = true; ridge.userData.neverDistanceCull = true; ridge.frustumCulled = false; mountainWorld.add(ridge); mountainBackdropObjects.push(ridge);
   mountainSolidColliders.push({ kind:'ellipse', x, z, rx:r*1.22, rz:r*0.76, topY:h-0.8 });
   if (h > 58) {
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.40, h * 0.23, 7, 1), mountainSnowMat);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.40, h * 0.23, 7, 1), mountainBackdropSnowMat);
     cap.position.set(x * 0.99, h * 0.80, z); cap.rotation.y = ridge.rotation.y; cap.scale.set(1.16,1,0.77);
-    cap.userData.backgroundMountain = true; cap.frustumCulled = false; mountainWorld.add(cap);
+    cap.userData.backgroundMountain = true; cap.userData.neverDistanceCull = true; cap.frustumCulled = false; mountainWorld.add(cap); mountainBackdropObjects.push(cap);
   }
 }
 // Trail is a sequence of connected, broad inclined ledges on a switchback route. Each edge meets
@@ -1884,7 +1911,7 @@ function addMountainRamp(startNode, endNode, index) {
   const ramp = new THREE.Group(); ramp.quaternion.setFromRotationMatrix(basis);
   ramp.position.set((startNode.x+endNode.x)/2, (startNode.y+endNode.y)/2, (startNode.z+endNode.z)/2).addScaledVector(up,-0.34);
   const bed = new THREE.Mesh(new THREE.BoxGeometry(length,0.68,width), index%2===0 ? mountainRockMat : mountainShadowRockMat);
-  bed.castShadow = true; bed.receiveShadow = true; ramp.add(bed); mountainWorld.add(ramp); registerStageObjectCull(ramp, 'mountain', 54, 72);
+  bed.castShadow = true; bed.receiveShadow = true; ramp.add(bed); ramp.userData.mountainTerrain = true; mountainWorld.add(ramp); // Mountain ledges are terrain/background and are never distance-clipped.
   // Small layered stone seams make the trail look carved out of real rock.
   for (let i=1;i<7;i++) {
     const t=i/7;
@@ -1972,7 +1999,7 @@ for(let junctionIndex=0;junctionIndex<mountainJunctions.length;junctionIndex++) 
   const geometry=new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3)); geometry.setIndex(indices); geometry.computeVertexNormals();
   const mesh=new THREE.Mesh(geometry,junctionIndex%2===0?mountainJunctionMaterial:mountainJunctionShadowMaterial);
-  mesh.position.set(junction.node.x,junction.node.y,junction.node.z); mesh.receiveShadow=true; mesh.castShadow=false; mountainWorld.add(mesh); registerStageObjectCull(mesh, 'mountain', 54, 72); junction.mesh=mesh;
+  mesh.position.set(junction.node.x,junction.node.y,junction.node.z); mesh.receiveShadow=true; mesh.castShadow=false; mesh.userData.mountainTerrain=true; mountainWorld.add(mesh); junction.mesh=mesh; // Never distance-clip the junctions that connect the trail.
 }
 function isMountainSpawnClear(x,z) {
   for(const block of mountainSolidColliders) {
@@ -2031,7 +2058,7 @@ for (let i=0;i<mountainTrailSegments.length;i++) {
     const size=1.05+rand()*1.65;
     const pt=mountainPointOnSegment(seg,t,side*(seg.width/2+size*1.25+1.25));
     const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(1,1),i%2?mountainRockMat:mountainShadowRockMat);
-    rock.position.set(pt.x,pt.y+size*0.52-0.1,pt.z); rock.scale.set(size*1.25,size*0.9,size); rock.rotation.set(rand()*0.3,rand()*Math.PI,rand()*0.28); rock.castShadow=true; rock.receiveShadow=true; mountainWorld.add(rock); registerStageObjectCull(rock, 'mountain', 36, 50);
+    rock.position.set(pt.x,pt.y+size*0.52-0.1,pt.z); rock.scale.set(size*1.25,size*0.9,size); rock.rotation.set(rand()*0.3,rand()*Math.PI,rand()*0.28); rock.castShadow=true; rock.receiveShadow=true; rock.userData.mountainTerrain=true; mountainWorld.add(rock); // Local mountain rock is also never distance-clipped.
     mountainSolidColliders.push({kind:'rock',x:pt.x,z:pt.z,radius:size*0.82,topY:pt.y+size*0.95});
   }
 }
@@ -2398,37 +2425,38 @@ addMountainTrampoline(9.00, -83.66, '#86c7ed');
 // A hidden-for-exploration magnet pickup exists in every world. The pickup is deliberately
 // kept off the minimap so players discover it naturally; once found, it attracts that world's
 // mints for the remainder of the stage.
-const magnetFrameMaterial = new THREE.MeshStandardMaterial({ color:'#b8d2d2', roughness:0.46, metalness:0.28, emissive:'#438c96', emissiveIntensity:0.07 });
-const magnetNorthMaterial = new THREE.MeshStandardMaterial({ color:'#ff5a59', roughness:0.36, metalness:0.18, emissive:'#8f202e', emissiveIntensity:0.18 });
-const magnetSouthMaterial = new THREE.MeshStandardMaterial({ color:'#4186ff', roughness:0.32, metalness:0.22, emissive:'#1747a8', emissiveIntensity:0.2 });
-const magnetAuraMaterial = new THREE.MeshBasicMaterial({ color:'#a9f7ff', transparent:true, opacity:0.16, depthWrite:false, toneMapped:false });
+const magnetFrameMaterial = new THREE.MeshStandardMaterial({ color:'#e5fff8', roughness:0.38, metalness:0.30, emissive:'#65e7f4', emissiveIntensity:0.24 });
+const magnetNorthMaterial = new THREE.MeshStandardMaterial({ color:'#ff4a4f', roughness:0.32, metalness:0.18, emissive:'#b72136', emissiveIntensity:0.36 });
+const magnetSouthMaterial = new THREE.MeshStandardMaterial({ color:'#367bff', roughness:0.28, metalness:0.22, emissive:'#2058d5', emissiveIntensity:0.38 });
+const magnetAuraMaterial = new THREE.MeshBasicMaterial({ color:'#a9f7ff', transparent:true, opacity:0.17, depthWrite:false, toneMapped:false });
 const magnetTubeGeometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
   new THREE.Vector3(-0.42,0.42,0), new THREE.Vector3(-0.43,0.12,0), new THREE.Vector3(-0.36,-0.18,0),
   new THREE.Vector3(-0.20,-0.34,0), new THREE.Vector3(0,-0.39,0), new THREE.Vector3(0.20,-0.34,0),
   new THREE.Vector3(0.36,-0.18,0), new THREE.Vector3(0.43,0.12,0), new THREE.Vector3(0.42,0.42,0),
 ]), 32, 0.125, 10, false);
 function createStageMagnet(stage, parent, x, baseY, z) {
-  const group = new THREE.Group(); group.name = `${stage}-hidden-mint-magnet`; group.scale.setScalar(0.82);
+  const group = new THREE.Group(); group.name = `${stage}-off-route-mint-magnet`; group.scale.setScalar(1.0);
   const frame = new THREE.Mesh(magnetTubeGeometry, magnetFrameMaterial); frame.castShadow = true; group.add(frame);
   const north = new THREE.Mesh(new RoundedBoxGeometry(0.30,0.23,0.28,4,0.05),magnetNorthMaterial);
   north.position.set(-0.42,0.43,0); north.castShadow = true; group.add(north);
   const south = new THREE.Mesh(new RoundedBoxGeometry(0.30,0.23,0.28,4,0.05),magnetSouthMaterial);
   south.position.set(0.42,0.43,0); south.castShadow = true; group.add(south);
-  const nMark = new THREE.Mesh(new THREE.SphereGeometry(0.035,8,6),new THREE.MeshBasicMaterial({color:'#fff9e9'})); nMark.position.set(-0.42,0.445,0.151); group.add(nMark);
+  const nMark = new THREE.Mesh(new THREE.SphereGeometry(0.05,10,8),new THREE.MeshBasicMaterial({color:'#fff9e9'})); nMark.position.set(-0.42,0.445,0.151); group.add(nMark);
   const sMark = nMark.clone(); sMark.position.x=0.42; group.add(sMark);
   const aura = new THREE.Mesh(new THREE.TorusGeometry(0.87,0.035,8,36),magnetAuraMaterial); aura.rotation.x=-Math.PI/2; aura.position.y=-0.34; group.add(aura);
   const sparkMaterial = new THREE.MeshBasicMaterial({color:'#fff9cf',toneMapped:false});
-  for (let i=0;i<4;i++) { const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.048,0),sparkMaterial); star.position.set(Math.cos(i*Math.PI/2)*0.78,0.12+Math.sin(i*2.2)*0.13,Math.sin(i*Math.PI/2)*0.5); group.add(star); }
-  group.position.set(x,baseY+1.0,z); group.visible=stage==='meadow'; parent.add(group);
+  for (let i=0;i<4;i++) { const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.068,0),sparkMaterial); star.position.set(Math.cos(i*Math.PI/2)*0.78,0.12+Math.sin(i*2.2)*0.13,Math.sin(i*Math.PI/2)*0.5); group.add(star); }
+  group.position.set(x,baseY+1.0,z); group.visible=false; parent.add(group);
   return { stage, group, aura, x, z, baseY, phase:rand()*Math.PI*2, collected:false };
 }
 // Pickups are tucked into peripheral nooks away from the main collectible routes.
 // They remain reachable from the ground/forest edge, but are not sitting on a mint trail or deck.
 const stageMagnetPickups = [
-  createStageMagnet('meadow',scene,86,0,-82),
-  createStageMagnet('water',waterWorld,85,0,-81),
-  createStageMagnet('bridge',bridgeWorld,73,0,-70),
-  createStageMagnet('mountain',mountainWorld,57,0.16,33),
+  createStageMagnet('meadow',scene, -96,0, 96),
+  createStageMagnet('water',waterWorld, 99,0,-99),
+  createStageMagnet('bridge',bridgeWorld, 82,0,-84),
+  // Blue Ridge pickup is at a remote ground-level side nook, over 60 units from the hiking trail.
+  createStageMagnet('mountain',mountainWorld,-72,0.16,88),
 ];
 function activeTrampolineSet() { return worldMode === 'mountain' ? mountainTrampolines : (worldMode === 'meadow' ? trampolines : []); }
 function findTrampolineAt(x, z) {
@@ -2455,6 +2483,7 @@ const state = {
   vx: 0, vy: 0, vz: 0, yaw: Math.PI, knockbackUntil: 0,
   pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, mountainMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
   mintGiftClaimed: false, stageAwaitingTap: false, clearAwaitingTap: false, pendingClearTarget: null,
+  lastMintCollectedAt: { meadow: -Infinity, water: -Infinity, bridge: -Infinity, mountain: -Infinity },
   magnetActive: false, magnetStage: 'meadow',
   trampolineReadyUntil: 0, trampolineLaunchUntil: 0, waterJumpsUsed: 0, ridingTurtle: false,
   highJumpUntil: 0, highJumpWasActive: false, bridgeStageComplete: false,
@@ -2470,19 +2499,21 @@ function resetStageMagnet(stage = worldMode) {
   for (const pickup of stageMagnetPickups) {
     pickup.collected = false;
     pickup.group.position.set(pickup.x, pickup.baseY + 1.0, pickup.z);
-    pickup.group.visible = pickup.stage === stage;
+    pickup.group.visible = false;
   }
   updateMagnetIndicator();
 }
 function updateStageMagnetVisuals(now) {
+  // Pickups are hidden by their off-route locations, not by tiny models or proximity invisibility.
+  // Keep the active world's magnet visible and easy to spot when its side area comes into view.
   for (const pickup of stageMagnetPickups) {
     const inStage = pickup.stage === worldMode && !pickup.collected;
     pickup.group.visible = inStage;
     if (!inStage) continue;
-    pickup.group.position.y = pickup.baseY + 1.0 + Math.sin(now * 0.0022 + pickup.phase) * 0.14;
-    pickup.group.rotation.y = Math.sin(now * 0.0007 + pickup.phase) * 0.23;
+    pickup.group.position.y = pickup.baseY + 1.0 + Math.sin(now * 0.0022 + pickup.phase) * 0.10;
+    pickup.group.rotation.y = Math.sin(now * 0.0007 + pickup.phase) * 0.18;
     pickup.aura.rotation.z = now * 0.0007 + pickup.phase;
-    pickup.aura.scale.setScalar(1 + Math.sin(now * 0.0031 + pickup.phase) * 0.035);
+    pickup.aura.scale.setScalar(0.94 + Math.sin(now * 0.0031 + pickup.phase) * 0.04);
   }
 }
 function tryCollectStageMagnet(now) {
@@ -2502,19 +2533,49 @@ function tryCollectStageMagnet(now) {
     }
   }
 }
-function attractMintTowardPlayer(mint, dt) {
-  if (!state.magnetActive || state.magnetStage !== worldMode || state.finale.active || mint.collected || !mint.group.visible) return;
-  const position = mint.group.position;
-  const dx = state.x - position.x, dz = state.z - position.z;
-  const dy = Math.abs((state.y + 1.0) - position.y);
-  const horizontal = Math.hypot(dx,dz);
-  // Magnet is a helpful nudge, not a vacuum: only nearby mints should drift to the player.
-  const radius = worldMode === 'water' ? 5.8 : 5.2;
-  if (horizontal > radius || dy > 4.2 || horizontal < 0.001) return;
-  const speed = horizontal > 2.6 ? 5.0 : 7.2;
-  const step = Math.min(horizontal, speed * Math.min(dt,0.05));
-  position.x += dx / horizontal * step;
-  position.z += dz / horizontal * step;
+function attractMintTowardPlayer(mint, dt, baselineLocalY = mint.group.position.y - (mint.magnetYOffset || 0)) {
+  if (!state.magnetActive || state.magnetStage !== worldMode || state.finale.active || mint.collected || !mint.group.visible) return false;
+  // Recompute transforms before reading world position. Compare and move in WORLD coordinates;
+  // the old pickup check compared a world-space player to parent-local mint positions.
+  mint.group.updateWorldMatrix(true, false);
+  mint.group.getWorldPosition(magnetMintWorldPosition);
+  magnetPlayerTargetScratch.set(state.x, state.y + 1.0, state.z);
+  const radius = worldMode === 'water' ? MAGNET_WATER_RANGE : MAGNET_LAND_RANGE;
+  const pull = calculateMagnetPullStep(
+    magnetMintWorldPosition, magnetPlayerTargetScratch, dt, radius, MAGNET_VERTICAL_RANGE, magnetPullStepScratch,
+  );
+  if (!pull.inRange) return false;
+  if (pull.moved) {
+    magnetMintNextWorldPosition.set(pull.x, pull.y, pull.z);
+    if (mint.group.parent) {
+      mint.group.parent.updateWorldMatrix(true, false);
+      mint.group.parent.worldToLocal(magnetMintNextLocalPosition.copy(magnetMintNextWorldPosition));
+      mint.group.position.copy(magnetMintNextLocalPosition);
+      mint.group.updateWorldMatrix(false, false);
+    } else {
+      mint.group.position.copy(magnetMintNextWorldPosition);
+      mint.group.updateWorldMatrix(false, false);
+    }
+    // Animation code supplies a fresh bob height every frame. Persist the magnet's vertical
+    // offset relative to that bob or it gets erased on the next frame and never reaches the player.
+    mint.magnetYOffset = mint.group.position.y - baselineLocalY;
+  }
+  return true;
+}
+function mintDistanceMetrics(mint, playerCenter) {
+  mint.group.updateWorldMatrix(true, false);
+  mint.group.getWorldPosition(magnetMintWorldPosition);
+  const dx = playerCenter.x - magnetMintWorldPosition.x;
+  const dy = playerCenter.y - magnetMintWorldPosition.y;
+  const dz = playerCenter.z - magnetMintWorldPosition.z;
+  magnetDistanceScratch.distanceSq = dx * dx + dy * dy + dz * dz;
+  magnetDistanceScratch.verticalDistance = Math.abs(dy);
+  return magnetDistanceScratch;
+}
+function mintPickupRadius(normalRadius, magnetPulling) {
+  // Magnetized mints visibly travel all the way toward the player before being collected.
+  // A consistent inner catch radius avoids using stage-local height in a world-space collision.
+  return magnetPulling ? Math.min(normalRadius, MAGNET_COLLECTION_RADIUS) : normalRadius;
 }
 const held = { left: false, right: false, forward: false, back: false, jump: false };
 let weather = { kind: 'clear', phase: 'clear', pendingKind: null, phaseStarted: 0, phaseEnds: 0, windCloudTarget: 0.42, nextAt: performance.now() + 38000 + rand() * 22000, until: 0, windX: 0, windZ: 0 };
@@ -2849,6 +2910,16 @@ function clearHeld() {
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show'); state.toastUntil = performance.now() + 1800;
 }
+function resetStageMintMessageTimer(stage = worldMode) {
+  if (state.lastMintCollectedAt) state.lastMintCollectedAt[stage] = -Infinity;
+}
+// Collectibles still count and sparkle on every pickup; only repetitive mint-related text is throttled.
+function registerStageMintPickupMessage(stage = worldMode) {
+  const now = performance.now();
+  const last = state.lastMintCollectedAt?.[stage] ?? -Infinity;
+  state.lastMintCollectedAt[stage] = now;
+  return now - last >= 20000;
+}
 function sparkle(position, count = 16) {
   const palette = ['#fff6d8', '#fff8ee', '#ffbecd', '#b5fff0', '#d9d0ff'];
   for (let i = 0; i < count; i++) {
@@ -3000,9 +3071,10 @@ function closeDialogue() {
 function claimSavedMintGift(friend) {
   if (!friend.savedMintGift || worldMode !== 'meadow' || state.mintGiftClaimed) return false;
   state.mintGiftClaimed = true; state.pearls++; state.score += 25;
+  const showMintMessage = registerStageMintPickupMessage('meadow');
   sparkle(new THREE.Vector3(friend.x, (friend.worldFloorY || 0) + 2.2, friend.z), 18);
   sfx(1040, 0.12, 'sine', 0.13); setTimeout(() => sfx(1380, 0.14, 'triangle', 0.11), 65);
-  updateHUD(); toast('Berry gave you a saved Fizz Mint!');
+  updateHUD(); if (showMintMessage) toast('Berry gave you a saved Fizz Mint!');
   if (state.pearls >= mintRequirementFor('meadow')) { closeDialogue(); startFizzFinale(); return true; }
   return false;
 }
@@ -3094,6 +3166,7 @@ function startStageFinale(targetWorld = 'water') {
 
   state.finale.active = true; state.finale.targetWorld = targetWorld; state.finale.startAt = performance.now();
   state.clearAwaitingTap = false; state.pendingClearTarget = null;
+  $('#finale-overlay').classList.add('level-cleared');
   state.finale.baseYaw = exitTurtle ? exitWalkYaw : state.yaw;
   state.stageAwaitingTap = false; $('#stage-continue-button').classList.add('is-hidden'); $('#finale-overlay').classList.remove('waiting-for-stage-tap', 'has-action');
   state.finale.camOffset.set(camera.position.x - state.x, camera.position.y - state.y, camera.position.z - state.z);
@@ -3118,7 +3191,7 @@ function startFizzFinale() { startStageFinale('water'); }
 
 function enterWaterWorld(now) {
   if (worldMode === 'water') return;
-  worldMode = 'water'; state.finale.enteredWater = true; resetStageMagnet('water');
+  worldMode = 'water'; state.finale.enteredWater = true; $('#finale-overlay').classList.remove('level-cleared'); resetStageMintMessageTimer('water'); resetStageMagnet('water');
   // Berry's gift can satisfy the 25-Fizz goal while one field pearl remains; clear every leftover before changing worlds.
   for (const pearl of pearls) { pearl.collected = true; pearl.group.visible = false; }
   state.stageAwaitingTap = true; state.paused = true;
@@ -3162,7 +3235,7 @@ function enterWaterWorld(now) {
 }
 function enterBridgeWorld(now) {
   if (worldMode === 'bridge') return;
-  worldMode = 'bridge'; state.finale.enteredWater = true; resetStageMagnet('bridge');
+  worldMode = 'bridge'; state.finale.enteredWater = true; $('#finale-overlay').classList.remove('level-cleared'); resetStageMintMessageTimer('bridge'); resetStageMagnet('bridge');
   for (const mint of waterMints) { mint.collected = true; mint.group.visible = false; }
   state.stageAwaitingTap = true; state.paused = true;
   // Clear all remaining Seafoam Mints once this stage is complete and the next one loads.
@@ -3224,7 +3297,7 @@ function enterBridgeWorld(now) {
 
 function enterMountainWorld(now) {
   if(worldMode==='mountain') return;
-  worldMode='mountain'; state.finale.enteredWater=true; resetStageMagnet('mountain');
+  worldMode='mountain'; state.finale.enteredWater=true; $('#finale-overlay').classList.remove('level-cleared'); resetStageMintMessageTimer('mountain'); resetStageMagnet('mountain');
   // Empty every remaining Bridge Mint as this next stage loads.
   for(const mint of bridgeMints){mint.collected=true;mint.group.visible=false;}
   state.stageAwaitingTap=true; state.paused=true;
@@ -3305,6 +3378,7 @@ function setReplayCollectibleVisibility(stage) {
     ['meadow', pearls], ['water', waterMints], ['bridge', bridgeMints], ['mountain', mountainMints],
   ];
   for (const [key, list] of entries) for (const mint of list) {
+    mint.magnetYOffset = 0;
     mint.collected = key !== stage;
     mint.group.visible = key === stage;
     if (key === 'meadow') mint.group.position.set(mint.x, mint.y, mint.z);
@@ -3324,6 +3398,8 @@ function launchReplayStage(stage) {
   createReplayMintCopies();
   closeDialogue(); clearHeld();
   state.started = true; state.paused = false; state.finale.active = false; state.stageAwaitingTap = false;
+  $('#finale-overlay').classList.remove('level-cleared');
+  resetStageMintMessageTimer(stage);
   state.friendsMet = 0; state.score = 0; state.elapsed = 0; state.mintGiftClaimed = false;
   state.activeFriend = null; state.activeDialogueLines = null; state.waterJumpsUsed = 0; state.ridingTurtle = false;
   state.vx = state.vy = state.vz = 0; state.knockbackUntil = 0; state.highJumpUntil = 0; state.highJumpWasActive = false;
@@ -3485,46 +3561,48 @@ function updateFizzFinale(now) {
 }
 function collectPearl(pearl) {
   if (pearl.collected || state.finale.active) return;
+  const showMintMessage = registerStageMintPickupMessage('meadow');
   pearl.collected = true; pearl.group.visible = false; state.pearls++; state.score += 25;
   sparkle(pearl.group.position.clone(), state.pearls >= mintRequirementFor('meadow') ? 36 : 10);
   sfx(960, 0.1, 'sine', 0.12); setTimeout(() => sfx(1240, 0.12, 'sine', 0.09), 45);
   updateHUD();
   if (state.pearls >= mintRequirementFor('meadow')) startFizzFinale();
-  else toast('A little fizz pearl!');
+  else if (showMintMessage) toast('A little fizz pearl!');
 }
 
 function collectWaterMint(mint) {
   if (mint.collected || worldMode !== 'water' || state.finale.active) return;
+  const showMintMessage = registerStageMintPickupMessage('water');
   if (seaTurtle.target === mint) seaTurtle.target = null;
   mint.collected = true; mint.group.visible = false; state.waterMintsCollected++; state.score += 40;
   sparkle(mint.group.position.clone(), 15);
   sfx(1120, 0.12, 'sine', 0.12); setTimeout(() => sfx(1460, 0.15, 'triangle', 0.095), 55);
   updateHUD(); drawMinimap();
   if (state.waterMintsCollected >= mintRequirementFor('water')) {
-    toast('Seafoam set complete! The ivy bridges are waking up…');
     startStageFinale('bridge');
-  } else toast('Seafoam mint! Cool and ocean-fresh.');
+  } else if (showMintMessage) toast('Seafoam mint! Cool and ocean-fresh.');
 }
 function collectBridgeMint(mint) {
   if (mint.collected || worldMode !== 'bridge' || state.finale.active) return;
+  const showMintMessage = registerStageMintPickupMessage('bridge');
   mint.collected = true; mint.group.visible = false; state.bridgeMintsCollected++; state.score += 55;
   sparkle(mint.group.position.clone(), 17);
   sfx(1010, 0.11, 'sine', 0.12); setTimeout(() => sfx(1390, 0.13, 'triangle', 0.1), 50);
   updateHUD(); drawMinimap();
   if (state.bridgeMintsCollected >= mintRequirementFor('bridge')) {
-    toast('Bridge garden complete! The Blue Ridge is next…');
     startStageFinale('mountain');
-  } else toast('Bridge mint! One step closer to the canopy.');
+  } else if (showMintMessage) toast('Bridge mint! One step closer to the canopy.');
 }
 function collectMountainMint(mint) {
   if (mint.collected || worldMode !== 'mountain' || state.finale.active) return;
+  const showMintMessage = registerStageMintPickupMessage('mountain');
   mint.collected = true; mint.group.visible = false; state.mountainMintsCollected++; state.score += 65;
   sparkle(mint.group.position.clone(), 18);
   sfx(1180,0.12,'sine',0.13); setTimeout(()=>sfx(1560,0.15,'triangle',0.1),55);
   updateHUD(); drawMinimap();
   if(state.mountainMintsCollected >= mintRequirementFor('mountain')) {
-    toast('All fresh mountain mints found! Summit celebration!'); startStageFinale('complete');
-  } else toast('Fresh mint! Cool as the ridge wind.');
+    startStageFinale('complete');
+  } else if (showMintMessage) toast('Fresh mint! Cool as the ridge wind.');
 }
 
 function collectHighJumpPowerup(powerup, now) {
@@ -3939,12 +4017,27 @@ function updateAmbientCreatures(dt, now) {
     if (critter.group.userData.tailFin) critter.group.userData.tailFin.rotation.y = gait * 0.52;
   }
 }
+function updateSunShadowAnchor() {
+  // Keep the sun direction fixed, but recenter the detail shadow volume around the active play
+  // area. Snap to shadow texels to avoid shimmering as the target follows sub-pixel player motion.
+  const texel = 76 / sun.shadow.mapSize.x;
+  const tx = Math.round((state.started ? state.x : 0) / texel) * texel;
+  const ty = Math.round((state.started ? state.y + 0.7 : 0) / texel) * texel;
+  const tz = Math.round((state.started ? state.z : 0) / texel) * texel;
+  sun.target.position.set(tx, ty, tz);
+  sun.position.set(tx - 35, ty + 65, tz + 32);
+  sun.target.updateMatrixWorld(true);
+  sun.updateMatrixWorld(true);
+  sun.shadow.camera.updateMatrixWorld(true);
+}
 function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
   updateWeather(dt, now);
   updateDynamicSky(dt, now);
   updateSpatialChunkLOD(now);
   updateStageObjectLOD(now);
+  // Force every skyline ridge/snow cap visible whenever Blue Ridge is active; no distance LOD.
+  if (worldMode === 'mountain') for (const backgroundMesh of mountainBackdropObjects) { backgroundMesh.visible = true; backgroundMesh.frustumCulled = false; }
   updateFriendDistanceLOD(now);
   updateDecorBubbleDistanceLOD(now);
   updateUnderwaterDetailLOD(now);
@@ -3971,36 +4064,48 @@ function update(dt, now) {
     if (worldMode === 'water') {
       for (const mint of waterMints) {
         if (mint.collected) continue;
-        mint.group.position.y = mint.baseY + Math.sin(now * 0.0019 + mint.phase) * 0.22;
+        const bobY = mint.baseY + Math.sin(now * 0.0019 + mint.phase) * 0.22;
+        mint.group.position.y = bobY + (mint.magnetYOffset || 0);
         mint.group.rotation.y = Math.sin(now * 0.00065 + mint.phase) * 0.16;
         mint.group.rotation.x = Math.sin(now * 0.0009 + mint.phase) * 0.045;
-        attractMintTowardPlayer(mint, dt);
-        if (playerCenter.distanceToSquared(mint.group.position) < 2.15 * 2.15) collectWaterMint(mint);
+        const magnetPulling = attractMintTowardPlayer(mint, dt, bobY);
+        const mintMetrics = mintDistanceMetrics(mint, playerCenter);
+        const pickupRadius = mintPickupRadius(2.15, magnetPulling);
+        if (mintMetrics.distanceSq < pickupRadius * pickupRadius) collectWaterMint(mint);
       }
     } else if (worldMode === 'bridge') {
       for (const mint of bridgeMints) {
         if (mint.collected) continue;
-        mint.group.position.y = mint.surfaceY + 1.12 + Math.sin(now * 0.0018 + mint.phase) * 0.16;
+        const bobY = mint.surfaceY + 1.12 + Math.sin(now * 0.0018 + mint.phase) * 0.16;
+        mint.group.position.y = bobY + (mint.magnetYOffset || 0);
         mint.group.rotation.y += dt * 0.55;
-        attractMintTowardPlayer(mint, dt);
-        if (playerCenter.distanceToSquared(mint.group.position) < 1.8 * 1.8) collectBridgeMint(mint);
+        const magnetPulling = attractMintTowardPlayer(mint, dt, bobY);
+        const mintMetrics = mintDistanceMetrics(mint, playerCenter);
+        const pickupRadius = mintPickupRadius(1.8, magnetPulling);
+        if (mintMetrics.distanceSq < pickupRadius * pickupRadius) collectBridgeMint(mint);
       }
       updateBridgePowerups(now);
     } else if (worldMode === 'mountain') {
       for(const mint of mountainMints) {
         if(mint.collected) continue;
-        mint.group.position.y=mint.surfaceY+1.05+Math.sin(now*0.0017+mint.phase)*0.17;
+        const bobY=mint.surfaceY+1.05+Math.sin(now*0.0017+mint.phase)*0.17;
+        mint.group.position.y=bobY+(mint.magnetYOffset||0);
         mint.group.rotation.y+=dt*0.58;
-        attractMintTowardPlayer(mint, dt);
-        if(playerCenter.distanceToSquared(mint.group.position)<1.8*1.8) collectMountainMint(mint);
+        const magnetPulling = attractMintTowardPlayer(mint, dt, bobY);
+        const mintMetrics = mintDistanceMetrics(mint, playerCenter);
+        const pickupRadius = mintPickupRadius(1.8, magnetPulling);
+        if(mintMetrics.distanceSq < pickupRadius * pickupRadius) collectMountainMint(mint);
       }
     } else {
       for (const pearl of pearls) {
         if (pearl.collected) continue;
-        pearl.group.position.y = pearl.y + Math.sin(now * 0.0018 + pearl.phase) * 0.13;
+        const bobY = pearl.y + Math.sin(now * 0.0018 + pearl.phase) * 0.13;
+        pearl.group.position.y = bobY + (pearl.magnetYOffset || 0);
         pearl.group.rotation.y += dt * 0.65;
-        attractMintTowardPlayer(pearl, dt);
-        if (playerCenter.distanceToSquared(pearl.group.position) < 1.65 * 1.65) collectPearl(pearl);
+        const magnetPulling = attractMintTowardPlayer(pearl, dt, bobY);
+        const mintMetrics = mintDistanceMetrics(pearl, playerCenter);
+        const pickupRadius = mintPickupRadius(1.65, magnetPulling);
+        if (mintMetrics.distanceSq < pickupRadius * pickupRadius) collectPearl(pearl);
       }
     }
   } else {
@@ -4071,11 +4176,13 @@ function update(dt, now) {
   updateCelestialBodies();
   if (performance.now() > state.toastUntil) $('#toast').classList.remove('show');
   if (worldMode === 'water' && state.started && !state.paused && now >= nextUnderwaterBloop) { sfx(260 + rand() * 280, 0.22 + rand() * 0.18, 'sine', 0.025); nextUnderwaterBloop = now + 4200 + rand() * 5600; }
+  updateSunShadowAnchor();
   musicTick();
 }
 
 // --- Menu and keyboard/touch input ----------------------------------------------------------------
 function startGame() {
+  resetStageMintMessageTimer('meadow');
   state.started = true; state.paused = false;
   if (weather.phase === 'clear') weather.nextAt = performance.now() + 32000 + rand() * 26000;
   $('#welcome-screen').classList.add('is-hidden'); $('#pause-screen').classList.add('is-hidden');
@@ -4208,7 +4315,6 @@ function frame(now) {
       lastAdaptiveResolutionChange = now;
     }
   }
-  if (now - lastShadowRefresh >= shadowRefreshInterval) { renderer.shadowMap.needsUpdate = true; lastShadowRefresh = now; }
   update(dt, now); renderer.render(scene, camera); requestAnimationFrame(frame);
 }
 function resize() {

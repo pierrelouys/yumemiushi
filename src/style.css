@@ -209,3 +209,117 @@ h1 em { color: #e25250; font-style: normal; }
 .stage-replay-button b { font-size: 12px; font-weight: 1000; line-height: 1.2; }
 .stage-replay-button small { color: #7ca599; font-size: 9px; font-weight: 850; }
 @media (max-width: 480px) { .stage-select-grid { grid-template-columns: 1fr; } .stage-replay-button { min-height: 62px; } }
+
+
+/* Requested UI refinement: translucent touch controls, glass-light dialogue, and a prominent
+   fullscreen option on the welcome screen. Keep labels/text readable over every biome. */
+@media (pointer: coarse), (hover: none) {
+  .move-stick {
+    background: radial-gradient(circle at 45% 32%, rgba(255,255,255,.50), rgba(239,255,248,.23)) !important;
+    border-color: rgba(255,255,255,.58) !important;
+    box-shadow: 0 4px 13px rgba(46,127,116,.09), inset 0 1px 0 rgba(255,255,255,.58) !important;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .stick-ring { border-color: rgba(65,139,124,.27) !important; }
+  .stick-knob {
+    background: linear-gradient(145deg, rgba(164,238,220,.78), rgba(117,212,195,.63)) !important;
+    border-color: rgba(255,255,255,.72) !important;
+    box-shadow: 0 2px 7px rgba(39,124,110,.13), inset 0 1px 0 rgba(255,255,255,.75) !important;
+  }
+  .mobile-action {
+    background: linear-gradient(145deg, rgba(255,250,248,.70), rgba(255,224,220,.48)) !important;
+    border-color: rgba(255,255,255,.72) !important;
+    box-shadow: 0 4px 13px rgba(130,79,78,.12), inset 0 1px 0 rgba(255,255,255,.68) !important;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .mobile-action.is-pressed { background: rgba(255,215,210,.82) !important; }
+}
+
+/* Restore the original opaque dialogue card. The touch controls remain translucent,
+   but friend dialogue uses the original solid cream panel for dependable readability. */
+.dialogue-card {
+  background: rgba(255,254,247,.96) !important;
+  border-color: rgba(255,255,255,.95) !important;
+  box-shadow: 0 20px 60px rgba(42,118,108,.2), inset 0 1px 0 white !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+}
+.dialogue-header h2 { color: #28675e !important; -webkit-text-stroke: 0 !important; text-shadow: none !important; }
+.dialogue-kicker { color: #91afa4 !important; -webkit-text-stroke: 0 !important; text-shadow: none !important; }
+#dialogue-text { color: #567f76 !important; -webkit-text-stroke: 0 !important; text-shadow: none !important; }
+.dialogue-avatar { background: #ffe8ef !important; }
+.dialogue-x { background: #edf8f1 !important; color: #50867a !important; text-shadow: none !important; }
+.dialogue-next { background: #b8f0df !important; color: #28675e !important; text-shadow: none !important; }
+/* Clear-result cards hide the stage requirement; requirements remain visible on arrival cards. */
+.finale-overlay.level-cleared #stage-goal { display: none !important; }
+
+/* Make fullscreen an obvious, primary welcome-screen option; Start also requests it directly. */
+.welcome-fullscreen-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 13px 0 9px;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid rgba(90,178,156,.34);
+  border-radius: 14px;
+  background: linear-gradient(110deg, rgba(221,250,239,.86), rgba(246,255,250,.91));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 3px 10px rgba(43,127,116,.07);
+  text-align: left;
+}
+.welcome-fullscreen-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.welcome-fullscreen-copy b { color: #478f7e; font-size: 8px; font-weight: 1000; letter-spacing: 1.4px; }
+.welcome-fullscreen-copy span { color: #57877c; font-size: 10px; font-weight: 800; line-height: 1.35; }
+.welcome-fullscreen-button {
+  flex: none;
+  min-height: 42px;
+  margin: 0 !important;
+  padding: 10px 13px !important;
+  border: 1px solid rgba(77,160,140,.52) !important;
+  border-radius: 11px !important;
+  background: linear-gradient(120deg, #baf1df, #d8f9e9) !important;
+  color: #205f55 !important;
+  box-shadow: 0 3px 0 rgba(99,188,163,.40), inset 0 1px 0 rgba(255,255,255,.9) !important;
+  font-size: 11px !important;
+  font-weight: 1000 !important;
+  letter-spacing: .25px;
+  text-decoration: none !important;
+  cursor: pointer;
+}
+.welcome-fullscreen-button:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(99,188,163,.4) !important; }
+.welcome-fullscreen-button.is-fullscreen { background: linear-gradient(120deg, #d5f7ec, #effff6) !important; }
+.welcome-secondary-actions { margin-top: 5px; }
+@media (max-width: 760px) {
+  .welcome-fullscreen-callout { gap: 7px; margin: 8px 0 6px; padding: 7px 8px; border-radius: 11px; }
+  .welcome-fullscreen-copy b { font-size: 7px; letter-spacing: .9px; }
+  .welcome-fullscreen-copy span { font-size: 8px; }
+  .welcome-fullscreen-button { min-height: 38px; padding: 8px 9px !important; font-size: 9px !important; }
+}
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 420px) {
+  .welcome-fullscreen-callout { margin: 5px 0 4px; padding: 5px 7px; }
+  .welcome-fullscreen-copy b { font-size: 6px; }
+  .welcome-fullscreen-copy span { font-size: 7px; }
+  .welcome-fullscreen-button { min-height: 31px; padding: 6px 8px !important; font-size: 8px !important; }
+}
+#app.pseudo-fullscreen { position: fixed; inset: 0; z-index: 999999; width: 100vw; height: 100dvh; }
+
+
+/* Mobile landscape: anchor dialogue bottom-center in the clear gap between the controls. */
+@media (pointer: coarse) and (orientation: landscape), (hover: none) and (orientation: landscape) {
+  #dialogue-card.dialogue-card {
+    left: 50% !important;
+    right: auto !important;
+    bottom: max(8px, env(safe-area-inset-bottom)) !important;
+    width: min(430px, calc(100vw - 390px)) !important;
+    min-width: 200px;
+    max-width: calc(100vw - 390px) !important;
+    max-height: min(58dvh, calc(100dvh - 16px)) !important;
+    overflow-y: auto !important;
+    padding: 10px 13px 9px !important;
+    border-radius: 16px !important;
+    transform: translateX(-50%) !important;
+    z-index: 8 !important;
+  }
+}

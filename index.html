@@ -89,10 +89,14 @@
           </div>
         </div>
         <div class="welcome-goal"><span class="goal-star">✦</span><span><b>Collect <span id="welcome-mint-required">50</span> Fizz Mints to unlock Water World.</b> There are <b id="welcome-mint-available">104</b> available in the meadow, so you can leave some behind. Wander freely and meet the plush friends along the way.</span></div>
+        <div class="welcome-fullscreen-callout">
+          <div class="welcome-fullscreen-copy"><b>BEST ON MOBILE</b><span>Full screen gives you more room for the controls.</span></div>
+          <button id="welcome-fullscreen-toggle" class="welcome-fullscreen-button" type="button">⛶ PLAY FULL SCREEN</button>
+        </div>
         <button id="start-button" class="primary-button" type="button">Enter the meadow <span>→</span></button>
         <p id="startup-status" class="startup-status" role="status" aria-live="polite"></p>
         <div class="welcome-controls"><span>WASD / arrows · move</span><span>SPACE · jump (hold to hop)</span><span>SPACE near a friend · talk / continue</span></div>
-        <div class="welcome-secondary-actions"><button id="welcome-fullscreen-toggle" class="text-button welcome-fullscreen-button" type="button">⛶ Full screen</button><button id="welcome-music-toggle" class="music-note-button" type="button">♫ Music is on · tap to toggle</button></div>
+        <div class="welcome-secondary-actions"><button id="welcome-music-toggle" class="music-note-button" type="button">♫ Music is on · tap to toggle</button></div>
       </div>
     </section>
 
@@ -133,7 +137,7 @@
         fullscreenButtons.forEach(button => {
           const isWelcomeButton = button.id === 'welcome-fullscreen-toggle';
           button.textContent = isWelcomeButton
-            ? (active ? '⤡ Exit fullscreen' : '⛶ Full screen')
+            ? (active ? '⤡ EXIT FULL SCREEN' : '⛶ PLAY FULL SCREEN')
             : (active ? '⤡' : '⛶');
           button.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
           button.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
@@ -177,6 +181,25 @@
       document.addEventListener('fullscreenchange', updateFullscreenButtons);
       document.addEventListener('webkitfullscreenchange', updateFullscreenButtons);
       updateFullscreenButtons();
+      // Try native fullscreen inside the Start click's user gesture. Some mobile browsers
+      // reject fullscreen for ordinary web pages; the prominent manual button remains available.
+      const requestFullscreenFromStartGesture = () => {
+        if (fullscreenElement() === app || app.classList.contains('pseudo-fullscreen')) return;
+        const enter = app.requestFullscreen || app.webkitRequestFullscreen;
+        const enableFallback = () => {
+          app.classList.add('pseudo-fullscreen');
+          updateFullscreenButtons();
+        };
+        if (enter) {
+          try {
+            const result = enter.call(app);
+            if (result && typeof result.catch === 'function') result.catch(enableFallback);
+            updateFullscreenButtons();
+            return;
+          } catch (_) { /* Fall through to the in-app immersive layout. */ }
+        }
+        enableFallback();
+      };
       const button = document.getElementById('start-button');
       const status = document.getElementById('startup-status');
       const labelNode = button && button.firstChild;
@@ -203,6 +226,7 @@
       button.addEventListener('click', event => {
         event.preventDefault();
         if (bootFailed) { window.location.reload(); return; }
+        requestFullscreenFromStartGesture();
         const start = window.__FIZZY_MEADOW_START__;
         if (typeof start === 'function') {
           pendingStart = false;
