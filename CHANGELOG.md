@@ -1,3 +1,28 @@
+## October 17, 2026 — Moonlight now lights the playable world; dusk halo reduced
+- Replaced the moon's hemisphere-only ambient contribution with a blue `AmbientLight`, so standard-material ground, grass blades, bridge sides, rocks, and character surfaces get broad night fill instead of only upward-facing surfaces being favoured.
+- Raised the full-moon contribution to 6.4 directional + 2.8 ambient intensity. Both still scale proportionally with the actual illuminated lunar fraction, night amount, lunar altitude, and the existing gentler underwater factor.
+- Corrected moon direction geometry: the horizontal component now shrinks as the Moon rises instead of keeping a fixed horizontal magnitude and capping direct light at a shallow angle. Moon lighting is updated in every world, including underwater, and aims around the active play height.
+- Faded the scripted twilight glow and lower-sky/fog band as night begins to remove the bright, inaccessible horizon halo. The moon's unlit side is transparent so it no longer paints a faint full-disc haze onto the sky.
+- Added pure direction-math regression tests for horizon, 30-degree altitude, and zenith; existing lunar phase, progression, and build checks continue to run.
+
+## October 17, 2026 — Friend nameplate proximity and real-cycle moonlight
+- Kept friend bodies under the existing 30/42-unit scenery LOD, but made nameplates visible only within 8.8 world units (twice the existing 4.4-unit talk distance); the measurement follows the same 3D vertical offset as the conversation check.
+- Replaced the fixed-average lunar-age approximation with a date/time-based Meeus phase-angle calculation, including orbital variation in the illuminated fraction; near-new/full numerical residue is clamped so new moon emits zero and full moon reaches exactly 100%.
+- Increased full-moon direct lighting to 4.6 plus a 1.35 blue hemisphere fill to illuminate grass and terrain. Both contributions scale linearly with the calculated lit fraction, fade with night and lunar altitude, and retain a gentler version underwater.
+- Added build regression checks for lunar reference instants, 0/40/100% light scaling, friend nameplate distance/initial hidden state, and the direct-plus-ambient lighting path.
+
+## October 17, 2026 — Fix cherry flashlight ground illumination
+- Corrected the actual spotlight aim: it now points down toward the floor ahead instead of nearly horizontally above the grass.
+- Increased usable spotlight range/intensity and widened its cone so the ground, grass blades, and nearby standard-material scenery receive visible warm light at night.
+- Tilted and resized the translucent beam to match the real spotlight direction and footprint, while keeping the cherry lens animation, local dusk/night trigger, and shadow-free performance choice.
+- Added build-time regression checks for downward aim, target distance, real-light intensity/range, and alignment between the visible cone and actual spotlight.
+
+## October 17, 2026 — Cherry flashlight after sunset
+- Added a small yellow, emissive lens to the front of the player's cherry and a soft forward-facing light cone.
+- The lens and beam fade in with a brief glow pulse once the existing local-time sunset/night transition begins, follow the player while moving or jumping, and fade out again at dawn.
+- The light is cosmetic and shadow-free to limit performance cost; no new location permission or network request is introduced.
+- Added a build regression guard for the nighttime trigger, lens, animated beam, and player-following spotlight.
+
 ## 2026-10-17 — Magnet attraction and shadow correction
 - Fixed magnet behavior: when active, mints inside its retained 1/3 influence radius now use a smaller, vertical-aware catch radius, so they visibly move toward the player instead of instantly triggering the normal larger collection sphere.
 - Magnetic movement uses world-space distance and transforms back into each mint's parent-local coordinate system before updating position.

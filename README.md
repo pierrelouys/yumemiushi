@@ -1,6 +1,10 @@
 # クリームソーダうみうし — Fizzy Meadow
 
-**Latest update — restored each UI surface to its original opacity:** HUD/clock/minimap panels and the welcome/finale cards retain their original translucent glass backgrounds; the dialogue bubble remains at its original 96% cream opacity; and the talk prompt retains its original 92% fill. Only the mobile joystick and jump/talk controls use the deliberately increased transparency from the control-UI change. Magnet models remain full size with a bright aura and poles; off-route placements are preserved, and horizontal attraction now reaches 60% of its original range.
+**Latest update — stronger moonlight and cleaner night horizon:** moonlight now uses a true blue ambient fill to reach all lit surfaces (including vertical grass blades, rocks, and bridge sides), plus a directional moon light aimed using the Moon's calculated altitude. Full-moon intensity is stronger; both contributions remain proportional to the real UTC lunar illuminated fraction and fade with night/altitude. The scripted dusk glow and lower-sky band fade as night takes over to prevent a bright halo below the playable world. The moon's unlit side no longer renders a faint full-disc haze.
+
+**Recent corrections — player shadow and Mint Magnet:** the ground shadow is neutral gray instead of green and slightly smaller. Magnet reach now uses 60% of the original range, keeping the existing pull speed, pickup behavior, and vertical movement.
+
+**UI presentation:** HUD/clock/minimap panels and welcome/finale cards retain their original translucent glass backgrounds; the dialogue bubble remains at its original 96% cream opacity; the talk prompt retains its original 92% fill. Only the mobile joystick and jump/talk controls use the deliberately increased transparency from the control-UI change.
 
 **Current progression and world presentation:** The welcome screen shows 50 Fizz required with 104 available in Meadow. Blue Ridge skyline ridges and snow caps remain outside the distance-culling system. Level-clear cards wait for a deliberate tap, and mint pickup toasts only appear after 20 seconds without another mint collection in the current stage.
 
@@ -70,6 +74,12 @@ You can use your own music. Place your MP3 files in `public/assets/` with these 
 
 The files are optional and are intentionally not included in this ZIP. Each stage attempts to load its corresponding MP3. If a file is missing, fails to load, or does not begin providing media data before the timeout, the existing synthesized music is used as fallback. After adding tracks, rebuild before deployment.
 
+### Friend nameplates and moonlight (2026-10-17)
+Friend bodies keep the existing distance LOD, but their nameplates are shown only within 8.8 world units, exactly twice the 4.4-unit talk range, measured with the same vertical offset as the talk interaction. The moon's phase and illuminated fraction are calculated from the real UTC date/time using a low-precision Meeus phase-angle model rather than assuming every lunation is a fixed average length. Direct blue moonlight and a blue `AmbientLight` fill both scale linearly with the illuminated fraction: 40% illumination is 40% of the maximum before the time-of-night and moon-altitude factors; new moon emits no moonlight and full moon reaches 100% of the phase multiplier. The direct light now tracks actual altitude instead of being capped at a shallow angle, the all-surface fill reaches the grass and scenery across the playable worlds, and the sky's scripted twilight glow/horizon band fades as night takes over. Light fades when night has not begun or the moon is below the horizon, and remains gentler underwater.
+
+### Cherry flashlight ground illumination (corrected 2026-10-17)
+The nighttime cherry uses a real Three.js spotlight aimed at the ground in front of the player, not just a decorative cone. Its target is near floor height about 6.3 units forward from the lamp, its range is 14 units, and its intensity ramps up to 72 as the lens turns on. The warm translucent cone is tilted down and sized to match the spotlight. The feature stays shadow-free to avoid an extra real-time shadow map cost; the spotlight still illuminates the lit grass and nearby standard-material scenery.
+
 ## Rendering and mobile performance
 
 This package intentionally restores the renderer and shadow-update behaviour from the revision before the latest experimental performance pass. The close-up plush character, previous shadow refresh cadence, and world content are retained; the environment batching and GPU-driven far-bubble shader from that experimental pass are not used here. The existing modest bubble LOD, distance culling, and adaptive pixel ratio from the prior baseline remain.
@@ -90,7 +100,7 @@ npm run build
 
 The development server prints `http://localhost:5173`. The static site is built into `dist/`.
 
-The build has regression checks for the standard and replay mint counts, underwater bubble count and turtle/triple-jump systems, adaptive render scale and LOD culling, the final Bridge World jump, Blue Ridge ridge collision, supported safe friend placement, and continuous mountain ramps across five lanes and all eight segments. It checks that ramp height changes stay below 0.15 world units per sampled step; the current maximum is 0.141.
+The build has regression checks for standard/replay mint counts, lunar illumination at new/full moon plus linear 0%/40%/100% light scaling, friend nameplate range, underwater bubble count and turtle/triple-jump systems, adaptive render scale and LOD culling, the final Bridge World jump, Blue Ridge ridge collision, supported safe friend placement, and continuous mountain ramps across five lanes and all eight segments. It checks that ramp height changes stay below 0.15 world units per sampled step; the current maximum is 0.141.
 
 ## Deploy to GitHub Pages
 

@@ -2,6 +2,8 @@ import { cp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calculateMagnetPullStep } from '../src/magnet-physics.js';
+import { lunarInfo, lunarLightScale } from '../src/lunar-phase.js';
+import { moonDirectionFromAltitude } from '../src/moon-lighting.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -15,6 +17,55 @@ await cp(path.join(root, 'public', 'assets'), path.join(dist, 'assets'), { recur
 const gameSource = await readFile(path.join(root, 'src', 'main.js'), 'utf8');
 const styleSource = await readFile(path.join(root, 'src', 'style.css'), 'utf8');
 const htmlSource = await readFile(path.join(root, 'index.html'), 'utf8');
+
+// Astronomical phase model and linear light response are release invariants.
+const knownNewMoon = lunarInfo(new Date(Date.UTC(2000, 0, 6, 18, 14)));
+const knownFullMoon = lunarInfo(new Date(Date.UTC(2000, 0, 21, 4, 40)));
+const currentWaxing = lunarInfo(new Date('2026-10-17T20:00:00Z'));
+const currentFirstQuarter = lunarInfo(new Date('2026-10-18T18:00:00Z'));
+if (knownNewMoon.illumination !== 0 || knownNewMoon.name !== 'New moon' ||
+    knownFullMoon.illumination !== 1 || knownFullMoon.name !== 'Full moon' ||
+    currentWaxing.name !== 'Waxing crescent' || currentFirstQuarter.name !== 'First quarter' ||
+    Math.abs(currentWaxing.illumination - 0.42) > 0.03 || Math.abs(currentFirstQuarter.illumination - 0.5) > 0.03 ||
+    lunarLightScale(0) !== 0 || Math.abs(lunarLightScale(0.4) - 0.4) > 1e-12 || lunarLightScale(1) !== 1 ||
+    lunarLightScale(-1) !== 0 || lunarLightScale(2) !== 1) {
+  throw new Error('Lunar calculation must match known new/full/quarter phases and preserve the exact illumination percentage in the light output.');
+}
+console.log(`Lunar phase verified: new moon 0%, full moon 100%, Oct 17 waxing ${Math.round(currentWaxing.illumination * 100)}%, Oct 18 first quarter ${Math.round(currentFirstQuarter.illumination * 100)}%; light scaling is linear.`);
+const directionHorizon = moonDirectionFromAltitude(0.7, 0);
+const directionMidAltitude = moonDirectionFromAltitude(0, 0.5);
+const directionZenith = moonDirectionFromAltitude(1.2, 1);
+const directionNorm = (d) => Math.hypot(d.x, d.y, d.z);
+if (Math.abs(directionHorizon.y) > 1e-12 || Math.abs(directionMidAltitude.y - 0.5) > 1e-12 ||
+    Math.abs(Math.hypot(directionMidAltitude.x, directionMidAltitude.z) - Math.sqrt(0.75)) > 1e-12 ||
+    Math.abs(directionZenith.y - 1) > 1e-12 || Math.hypot(directionZenith.x, directionZenith.z) > 1e-12 ||
+    Math.abs(directionNorm(directionHorizon) - 1) > 1e-12 ||
+    Math.abs(directionNorm(directionMidAltitude) - 1) > 1e-12 ||
+    Math.abs(directionNorm(directionZenith) - 1) > 1e-12) {
+  throw new Error('Moonlight direction must correctly track horizon, mid-altitude, and zenith instead of capping at a shallow angle.');
+}
+console.log('Moon direction verified: unit vectors correctly represent horizon, 30-degree altitude, and zenith.');
+if (!gameSource.includes("import { lunarInfo, lunarLightScale } from './lunar-phase.js';") ||
+    !gameSource.includes("import { moonDirectionFromAltitude } from './moon-lighting.js';") ||
+    !gameSource.includes('const FRIEND_NAME_VISIBLE_RANGE = FRIEND_TALK_RANGE * 2;') ||
+    !gameSource.includes('friend.nameSprite.visible = near && closeEnoughForName;') ||
+    !gameSource.includes('nameDistanceSquared <= FRIEND_NAME_VISIBLE_RANGE * FRIEND_NAME_VISIBLE_RANGE') ||
+    !gameSource.includes("const moonAmbientLight = new THREE.AmbientLight('#c5d7ff', 0);") ||
+    !gameSource.includes('const MOONLIGHT_FULL_INTENSITY = 6.4;') ||
+    !gameSource.includes('const MOON_AMBIENT_FULL_INTENSITY = 2.8;') ||
+    !gameSource.includes('moonDirectionFromAltitude(azimuth, sinAltitude)') ||
+    !gameSource.includes('const nightHorizonBlend = smooth01(0.005, 0.18, nightWeight);') ||
+    !gameSource.includes('const twilightGlow = twilight * (1 - smooth01(0.005, 0.11, nightWeight));') ||
+    !gameSource.includes('float alpha = uNight * lit;') ||
+    !gameSource.includes('moonLight.intensity = MOONLIGHT_FULL_INTENSITY * phaseNight * waterScale;') ||
+    !gameSource.includes('moonAmbientLight.intensity = MOON_AMBIENT_FULL_INTENSITY * phaseNight') ||
+    !gameSource.includes('updateMoonlightIntensity(THREE.MathUtils.clamp(sinAltitude, 0, 1));')) {
+  throw new Error('Friend nameplates and lunar light must use the expected range, full-scene ambient contribution, correct moon direction, and horizon fade.');
+}
+if (!gameSource.includes('sprite.visible = false; // The distance LOD enables it only when the player is within nameplate range.')) {
+  throw new Error('Friend nameplates must start hidden until the proximity check enables them.');
+}
+console.log('Friend nameplates verified: 8.8-unit 3D range (2× talk range), with existing body LOD preserved.');
 function countLiteralSpots(arrayName) {
   const match = gameSource.match(new RegExp(`const ${arrayName} = \\[([\\s\\S]*?)\\];`));
   if (!match) throw new Error(`Could not find the ${arrayName} collectible list.`);
@@ -452,6 +503,36 @@ if (!/desiredX=dx\/dist\*24\.0/.test(gameSource) ||
 if (!/const seaMintSpots = \[\.\.\.baseSeaMintSpots, \.\.\.baseSeaMintSpots\.map/.test(gameSource) || !/parallel sweep makes the path vague and exploratory/.test(gameSource)) {
   throw new Error('Water mint layout must remain a sparse, vague diagonal route.');
 }
+if (!/function addCherry\(root, scale = 1, withFlashlight = false\)/.test(gameSource) ||
+    !/if \(withFlashlight\)/.test(gameSource) ||
+    !/root\.userData\.cherryFlashlightLensMaterial = lensMaterial/.test(gameSource) ||
+    !/playerFlashlightTarget\.position\.set\(0, -0\.08, 7\.4\)/.test(gameSource) ||
+    !/const playerFlashlight = new THREE\.SpotLight\('#fff0c1', 0, 14, 0\.50, 0\.68, 1\.25\)/.test(gameSource) ||
+    !/playerFlashlight\.intensity = blend \* 72/.test(gameSource) ||
+    !/const FLASHLIGHT_BEAM_LENGTH = 6\.2/.test(gameSource) ||
+    !/const FLASHLIGHT_BEAM_TILT = 0\.32/.test(gameSource) ||
+    !/new THREE\.ConeGeometry\(3\.4, FLASHLIGHT_BEAM_LENGTH, 32, 1, true\)/.test(gameSource) ||
+    !/playerFlashlightBeam\.rotation\.x = -Math\.PI \/ 2 \+ FLASHLIGHT_BEAM_TILT/.test(gameSource) ||
+    !/playerFlashlightBeamMaterial\.opacity = blend \* 0\.13/.test(gameSource) ||
+    !/function updatePlayerFlashlight\(dt, now\)/.test(gameSource) ||
+    !/const shouldBeOn = nightWeight > 0/.test(gameSource) ||
+    !/updatePlayerFlashlight\(dt, now\)/.test(gameSource) ||
+    !/playerFlashlightBeam\.position\.y = 2\.04 - \(FLASHLIGHT_BEAM_LENGTH \* 0\.5 \* Math\.sin\(FLASHLIGHT_BEAM_TILT\) \* blend\)/.test(gameSource) ||
+    !/playerFlashlightBeam\.position\.z = 1\.06 \+ \(FLASHLIGHT_BEAM_LENGTH \* 0\.5 \* Math\.cos\(FLASHLIGHT_BEAM_TILT\) \* blend\)/.test(gameSource)) {
+  throw new Error('The nighttime cherry flashlight must animate its lens and use a bright, downward-aimed real spotlight and matching forward beam.');
+}
+// Regression guard for the lighting bug: the axis to the target must angle down far enough
+// that the spotlight intersects the floor within its configured range.
+const flashlightTargetDrop = 2.04 - (-0.08);
+const flashlightTargetRun = 7.4 - 1.06;
+const flashlightAimAngle = Math.atan2(flashlightTargetDrop, flashlightTargetRun);
+const flashlightBeamAngle = Math.atan2(3.4, 6.2);
+if (flashlightAimAngle < 0.25 || flashlightAimAngle > 0.50 ||
+    Math.abs(flashlightAimAngle - 0.32) > 0.06 || Math.abs(flashlightBeamAngle - 0.50) > 0.03 ||
+    Math.hypot(flashlightTargetDrop, flashlightTargetRun) > 14) {
+  throw new Error('Flashlight aim/cone mismatch: the visible beam and real spotlight must reach and illuminate the floor ahead.');
+}
+console.log('Cherry flashlight verified: dusk activation, downward ground aim, sufficient spotlight intensity, and matching visible cone.');
 const turtleStartMatch = gameSource.match(/const group = new THREE\.Group\(\); group\.position\.set\(([-\d.]+), 0, ([-\d.]+)\); waterWorld\.add\(group\);/);
 if (!turtleStartMatch) throw new Error('Water World turtle must have an explicit spawn point.');
 const turtleStartX = Number(turtleStartMatch[1]), turtleStartZ = Number(turtleStartMatch[2]);

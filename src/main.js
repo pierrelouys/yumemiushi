@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { calculateMagnetPullStep } from './magnet-physics.js';
+import { lunarInfo, lunarLightScale } from './lunar-phase.js';
+import { moonDirectionFromAltitude } from './moon-lighting.js';
 
 // クリームソーダうみうし — a free-roaming 3D plush friendship meadow.
 // Movement is player-driven on X/Z; Y follows gravity and the shared jump action.
@@ -179,10 +181,19 @@ scene.add(fillLight);
 // The moon has its own phase-dependent light; it becomes the dominant light source at night.
 const moonTarget = new THREE.Object3D();
 scene.add(moonTarget);
-const moonLight = new THREE.DirectionalLight('#c8dcff', 0);
+const moonLight = new THREE.DirectionalLight('#d4e0ff', 0);
 moonLight.target = moonTarget;
 moonLight.castShadow = false;
 scene.add(moonLight);
+// A true ambient fill reaches all standard-material surfaces, including vertical grass blades,
+// trunks, bridge sides, and mountain faces; unlike the background sky dome it is scene lighting.
+const moonAmbientLight = new THREE.AmbientLight('#c5d7ff', 0);
+scene.add(moonAmbientLight);
+// Stylized full-moon light should read clearly in the playable world. Both lights are multiplied
+// by the same lunar fraction, night amount, and altitude amount (so 40% moon = 40% light).
+const MOONLIGHT_FULL_INTENSITY = 6.4;
+const MOON_AMBIENT_FULL_INTENSITY = 2.8;
+const moonDirectionScratch = new THREE.Vector3();
 let moonMesh = null, moonMaterial = null;
 let lunarPhase = 0, moonIllumination = 0, nightWeight = 0;
 let currentLocalHour = new Date().getHours() + new Date().getMinutes() / 60;
@@ -236,16 +247,17 @@ function updateSkyGradient(topColor, horizonColor, lowerColor) {
   skyContext.fillStyle = gradient;
   skyContext.fillRect(0, 0, width, height);
 
-  // Soft sunrise/sunset glow is static between local-clock updates; cloud density and
-  // sun visibility are handled by cheap material/lighting updates, not canvas uploads.
+  // A soft sunrise/sunset glow is useful during twilight, but it must fade as actual
+  // night lighting takes over. Otherwise it looks like a floating halo beyond the playable floor.
   const hour = currentLocalHour;
   const dawn = 1 - smooth01(5.0, 8.4, hour);
   const dusk = smooth01(16.4, 19.8, hour);
   const twilight = Math.max(dawn * smooth01(4.0, 5.4, hour), dusk);
-  if (nightWeight < 0.55 && twilight > 0.08) {
-    const glow = skyContext.createRadialGradient(width * 0.50, height * 0.52, 1, width * 0.50, height * 0.52, height * 0.34);
-    glow.addColorStop(0, `rgba(255,${Math.round(180 + twilight * 38)},${Math.round(136 + twilight * 38)},${0.24 * twilight})`);
-    glow.addColorStop(0.4, `rgba(255,176,150,${0.10 * twilight})`);
+  const twilightGlow = twilight * (1 - smooth01(0.005, 0.11, nightWeight));
+  if (twilightGlow > 0.025) {
+    const glow = skyContext.createRadialGradient(width * 0.50, height * 0.52, 1, width * 0.50, height * 0.52, height * 0.29);
+    glow.addColorStop(0, `rgba(255,${Math.round(180 + twilightGlow * 38)},${Math.round(136 + twilightGlow * 38)},${0.14 * twilightGlow})`);
+    glow.addColorStop(0.4, `rgba(255,176,150,${0.055 * twilightGlow})`);
     glow.addColorStop(1, 'rgba(255,176,150,0)');
     skyContext.fillStyle = glow;
     skyContext.fillRect(0, 0, width, height);
@@ -438,22 +450,15 @@ const mountainDaylightKeys = daylightKeys.map((key, i) => ({
   ground: ['#182b31','#2b414b','#688b85','#547d82','#4f7680','#607c7c','#424c50','#24353d','#182b31'][i],
   hemi: ['#1f2b3e','#73818e','#e6e7e3','#d6e5ee','#dcebf1','#ede0d8','#cdb3af','#394859','#1f2b3e'][i],
 }));
-const SYNODIC_MONTH_DAYS = 29.530588853;
-const KNOWN_NEW_MOON_UTC = Date.UTC(2000, 0, 6, 18, 14);
-function lunarInfo(now = new Date()) {
-  const ageDays = ((now.getTime() - KNOWN_NEW_MOON_UTC) / 86400000 % SYNODIC_MONTH_DAYS + SYNODIC_MONTH_DAYS) % SYNODIC_MONTH_DAYS;
-  const phase = ageDays / SYNODIC_MONTH_DAYS;
-  const illumination = (1 - Math.cos(phase * Math.PI * 2)) * 0.5;
-  let name;
-  if (phase < 0.035 || phase >= 0.965) name = 'New moon';
-  else if (phase < 0.22) name = 'Waxing crescent';
-  else if (phase < 0.28) name = 'First quarter';
-  else if (phase < 0.47) name = 'Waxing gibbous';
-  else if (phase < 0.53) name = 'Full moon';
-  else if (phase < 0.72) name = 'Waning gibbous';
-  else if (phase < 0.78) name = 'Last quarter';
-  else name = 'Waning crescent';
-  return { phase, illumination, name };
+function updateMoonlightIntensity(altitudeWeight = 1) {
+  // The illuminated fraction is the linear multiplier: 40% lunar illumination gives exactly
+  // 40% of the full-moon contribution at the same time/altitude. New moon is clamped to zero.
+  const phaseNight = lunarLightScale(moonIllumination)
+    * THREE.MathUtils.clamp(nightWeight, 0, 1)
+    * THREE.MathUtils.clamp(altitudeWeight, 0, 1);
+  const waterScale = worldMode === 'water' ? 0.5 : 1;
+  moonLight.intensity = MOONLIGHT_FULL_INTENSITY * phaseNight * waterScale;
+  moonAmbientLight.intensity = MOON_AMBIENT_FULL_INTENSITY * phaseNight * (worldMode === 'water' ? 0.65 : 1);
 }
 function smooth01(edge0, edge1, value) {
   const x = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
@@ -491,6 +496,16 @@ function applyLocalTime() {
   const skyColor = mixColor(left.sky, right.sky);
   const fogColor = mixColor(left.fog, right.fog);
   const lowerColor = mixColor(left.ground, right.ground);
+  // Keep the inaccessible lower part of the sky dome from retaining a bright twilight band
+  // once moonlight begins. The sky top still follows the original time-of-day palette.
+  const nightHorizon = worldMode === 'water' ? new THREE.Color('#08182e')
+    : (worldMode === 'bridge' ? new THREE.Color('#09111e')
+      : (worldMode === 'mountain' ? new THREE.Color('#0a1421') : new THREE.Color('#09111e')));
+  const nightLowerSky = worldMode === 'water' ? new THREE.Color('#071927')
+    : (worldMode === 'bridge' ? new THREE.Color('#09150f')
+      : (worldMode === 'mountain' ? new THREE.Color('#182b31') : new THREE.Color('#101a19')));
+  const nightHorizonBlend = smooth01(0.005, 0.18, nightWeight);
+  fogColor.lerp(nightHorizon, nightHorizonBlend);
   skyBaseColor.copy(skyColor);
   skyBaseFogColor.copy(fogColor);
   scene.background.copy(skyBaseColor);
@@ -511,6 +526,7 @@ function applyLocalTime() {
   } else {
     lowerAtmosphere = new THREE.Color(worldMode === 'water' ? '#b4f0f1' : (worldMode === 'bridge' ? '#f0e7d8' : (worldMode === 'mountain' ? '#d4e4ee' : '#f3f7ff')));
   }
+  lowerAtmosphere.lerp(nightLowerSky, nightHorizonBlend);
   skyBaseLowerColor.copy(lowerAtmosphere);
   updateSkyGradient(skyBaseColor.clone().multiplyScalar(nightWeight > 0.55 ? 0.74 : 0.86), skyBaseFogColor, skyBaseLowerColor);
   updateSkyActors(performance.now());
@@ -523,7 +539,7 @@ function applyLocalTime() {
   fillLight.intensity = THREE.MathUtils.lerp(left.fillI, right.fillI, t) * (1 - nightWeight * 0.55);
   const daylightAngle = ((hour - 6) / 12) * Math.PI;
   sun.position.set(Math.cos(daylightAngle) * 65, Math.max(7, Math.sin(daylightAngle) * 72), Math.sin(daylightAngle) * 60);
-  moonLight.intensity = (worldMode === 'water' ? 0.16 : 0.48) * moonIllumination * nightWeight;
+  updateMoonlightIntensity();
   starMaterial.opacity = 0.92 * nightWeight;
   if (moonMaterial) {
     moonMaterial.uniforms.uPhase.value = lunarPhase;
@@ -533,8 +549,7 @@ function applyLocalTime() {
 applyLocalTime();
 let nextLocalTimeCheck = performance.now() + (60 - new Date().getSeconds()) * 1000;
 function updateCelestialBodies() {
-  if (!moonMesh) return;
-  if (worldMode === 'water') { moonMesh.visible = false; return; }
+  if (!moonMesh) { updateMoonlightIntensity(); return; }
   // Approximate lunar transit from phase: new moon near solar transit, full moon about
   // twelve hours later. The phase is astronomical (UTC-date based), while clock/sky use local time.
   const transit = (12 + lunarPhase * 24) % 24;
@@ -544,14 +559,20 @@ function updateCelestialBodies() {
     ? Math.cos(absOffset / 6 * Math.PI / 2)
     : -Math.sin((absOffset - 6) / 6 * Math.PI / 2);
   const azimuth = (currentLocalHour / 24) * Math.PI * 2 - Math.PI / 2;
-  const moonElevation = sinAltitude * 0.12 + 0.01;
-  const direction = new THREE.Vector3(Math.cos(azimuth), moonElevation, Math.sin(azimuth)).normalize();
+  // Use the actual sine of the approximate altitude for all three direction components.
+  // The previous fixed 0.45 elevation capped the moon around 25 degrees above the horizon,
+  // so most direct light skimmed across surfaces instead of lighting the ground.
+  const directionParts = moonDirectionFromAltitude(azimuth, sinAltitude);
+  const direction = moonDirectionScratch.set(directionParts.x, directionParts.y, directionParts.z);
   moonMesh.position.copy(camera.position).addScaledVector(direction, 205);
   const towardCamera = camera.position.clone().sub(moonMesh.position).normalize();
   moonMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), towardCamera);
-  moonMesh.visible = nightWeight > 0.025 && moonIllumination > 0.006 && sinAltitude > -0.015;
-  moonTarget.position.set(state.x, 0, state.z);
-  moonLight.position.set(state.x + direction.x * 90, 2 + direction.y * 90, state.z + direction.z * 90);
+  moonMesh.visible = worldMode !== 'water' && nightWeight > 0.025 && moonIllumination > 0.006 && sinAltitude > -0.015;
+  // Target the active play height. Keep the direction correct for elevated bridges and ridges,
+  // and update it in every world even when the visible moon is hidden underwater.
+  moonTarget.position.set(state.x, state.y, state.z);
+  moonLight.position.copy(moonTarget.position).addScaledVector(direction, 90);
+  updateMoonlightIntensity(THREE.MathUtils.clamp(sinAltitude, 0, 1));
 }
 
 const colors = {
@@ -617,7 +638,8 @@ moonMaterial = new THREE.ShaderMaterial({
       vec3 surface = texture2D(uSurface, vUvMoon).rgb;
       float limbShade = 0.72 + 0.28 * max(0.0, n.z);
       vec3 colour = surface * (0.035 + 0.98 * lit) * limbShade;
-      float alpha = uNight * (0.06 + 0.94 * lit);
+      // Keep the unlit side transparent instead of drawing a faint full-disc haze on the sky.
+      float alpha = uNight * lit;
       gl_FragColor = vec4(colour, alpha);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -951,7 +973,7 @@ function makeFeeler(side, root, bodyColor = colors.mint, playerOwned = false) {
   return { mesh, tip: mesh, side, baseRotZ };
 }
 
-function addCherry(root, scale = 1) {
+function addCherry(root, scale = 1, withFlashlight = false) {
   // Plump red felt cherry, seated between the feelers toward the face end.
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.70, 40, 30), cherryPlush.clone());
   ball.position.set(0, 2.03, 0.42);
@@ -959,6 +981,20 @@ function addCherry(root, scale = 1) {
   ball.castShadow = true; ball.receiveShadow = true; root.add(ball);
   root.userData.cherryMesh = ball;
   root.userData.cherryBaseColor = ball.material.color.clone();
+  if (withFlashlight) {
+    // A flush, flattened lens fades from invisible to warm yellow after the local sunset.
+    const lensMaterial = new THREE.MeshStandardMaterial({
+      color: '#fff0a8', emissive: '#ffc83d', emissiveIntensity: 0,
+      roughness: 0.38, metalness: 0.02, transparent: true, opacity: 0, depthWrite: false,
+    });
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.30, 24, 18), lensMaterial);
+    lens.position.set(0, 0.015, 0.655);
+    lens.scale.set(1, 0.80, 0.22);
+    lens.renderOrder = 2;
+    ball.add(lens);
+    root.userData.cherryFlashlightLens = lens;
+    root.userData.cherryFlashlightLensMaterial = lensMaterial;
+  }
   const inset = new THREE.Mesh(new THREE.SphereGeometry(0.105, 16, 12), new THREE.MeshStandardMaterial({ color: '#a72e33', roughness: 1 }));
   inset.position.set(-0.05, 2.66, 0.39); inset.scale.set(1.1, 0.32, 0.85); root.add(inset);
   const stemCurve = new THREE.CatmullRomCurve3([
@@ -1055,7 +1091,7 @@ function buildSlug({ player = false, bodyColor = colors.mint, eyeColor = colors.
   makeEye(root, -0.32, cy, eyeColor, player ? 1.0 : 0.88);
   makeEye(root, 0.32, cy, eyeColor, player ? 1.0 : 0.88);
   if (player) addSideStitches(root);
-  if (cherry) addCherry(root, 1);
+  if (cherry) addCherry(root, 1, player);
   addTopAccessory(root, accessory, bodyColor);
   root.scale.setScalar(size);
   root.userData.feelers = feelers;
@@ -1068,6 +1104,37 @@ const player = buildSlug({ player: true, cherry: true, furCount: 8500 });
 player.position.set(0, 0, 12);
 player.rotation.y = Math.PI; // Face looks ahead, away from the rear camera; its stitched stars are on the front.
 scene.add(player);
+// The cherry is the player's little flashlight. Both the lamp and its soft visible cone
+// are parented to the character, so they follow turns, jumps, and every world transition.
+const playerFlashlightTarget = new THREE.Object3D();
+// Aim down at the ground several steps ahead. The old target sat 1.42 units high, so the
+// narrow, short-range spotlight never reached the floor in front of the player.
+playerFlashlightTarget.position.set(0, -0.08, 7.4);
+player.add(playerFlashlightTarget);
+const playerFlashlight = new THREE.SpotLight('#fff0c1', 0, 14, 0.50, 0.68, 1.25);
+playerFlashlight.position.set(0, 2.04, 1.06);
+playerFlashlight.target = playerFlashlightTarget;
+playerFlashlight.castShadow = false;
+player.add(playerFlashlight);
+const FLASHLIGHT_BEAM_LENGTH = 6.2;
+const FLASHLIGHT_BEAM_TILT = 0.32;
+const playerFlashlightBeamMaterial = new THREE.MeshBasicMaterial({
+  color: '#fff0b9', transparent: true, opacity: 0, depthWrite: false,
+  side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false,
+});
+// Match the visible cone to the real spotlight's width and downward angle. Keep it translucent
+// so grass, stones, and other objects remain visible through the beam.
+const playerFlashlightBeam = new THREE.Mesh(
+  new THREE.ConeGeometry(3.4, FLASHLIGHT_BEAM_LENGTH, 32, 1, true), playerFlashlightBeamMaterial
+);
+playerFlashlightBeam.rotation.x = -Math.PI / 2 + FLASHLIGHT_BEAM_TILT;
+playerFlashlightBeam.position.set(0, 2.04, 1.06);
+playerFlashlightBeam.scale.set(0.001, 0.001, 0.001);
+playerFlashlightBeam.renderOrder = 1;
+player.add(playerFlashlightBeam);
+player.userData.flashlightBlend = 0;
+player.userData.flashlightWantsOn = false;
+player.userData.flashlightTurnOnAt = null;
 const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.5, 36), new THREE.MeshBasicMaterial({ color: '#383838', transparent: true, opacity: 0.22, depthWrite: false }));
 shadow.rotation.x = -Math.PI / 2;
 shadow.position.y = 0.025;
@@ -2105,6 +2172,7 @@ function makeNameSprite(name) {
   ctx.fillStyle = '#326e64'; ctx.font = 'bold 39px ui-rounded, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(name, 192, 57);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = anisotropy;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sprite.visible = false; // The distance LOD enables it only when the player is within nameplate range.
   sprite.scale.set(2.35, 0.69, 1); sprite.renderOrder = 5;
   return sprite;
 }
@@ -2129,7 +2197,9 @@ const friends = friendSpecs.map((spec, index) => {
   const bobble = { group: bubbleMesh, y: 3.5, phase: rand() * 6.28, intendedVisible: false };
   return { ...spec, slug, nameSprite: name, bobble, met: false, dialogueIndex: 0, phase: rand() * Math.PI * 2, worldFloorY: 0 };
 });
-// Distant friends and their nameplates are removed from rendering while all mint targets stay visible.
+// Bodies may remain in view at normal scenery LOD, but nameplates only appear within twice talk range.
+const FRIEND_TALK_RANGE = 4.4;
+const FRIEND_NAME_VISIBLE_RANGE = FRIEND_TALK_RANGE * 2;
 let lastFriendDistanceCull = 0;
 function updateFriendDistanceLOD(now) {
   if (now - lastFriendDistanceCull < 160) return;
@@ -2137,9 +2207,15 @@ function updateFriendDistanceLOD(now) {
   const range = touchGpuProfile ? 30 : 42;
   const limitSq = range * range;
   for (const friend of friends) {
-    const dx = friend.slug.position.x - state.x, dz = friend.slug.position.z - state.z;
-    const near = dx * dx + dz * dz <= limitSq || state.activeFriend === friend;
-    friend.slug.visible = near; friend.nameSprite.visible = near;
+    const dx = friend.slug.position.x - state.x;
+    const dy = friend.slug.position.y + 0.8 - state.y;
+    const dz = friend.slug.position.z - state.z;
+    const horizontalDistanceSquared = dx * dx + dz * dz;
+    const nameDistanceSquared = horizontalDistanceSquared + dy * dy;
+    const near = horizontalDistanceSquared <= limitSq || state.activeFriend === friend;
+    const closeEnoughForName = nameDistanceSquared <= FRIEND_NAME_VISIBLE_RANGE * FRIEND_NAME_VISIBLE_RANGE;
+    friend.slug.visible = near;
+    friend.nameSprite.visible = near && closeEnoughForName;
     friend.bobble.group.visible = Boolean(friend.bobble.intendedVisible && near);
   }
 }
@@ -2982,7 +3058,6 @@ function drawMinimap() {
   ctx.restore();
 }
 
-const FRIEND_TALK_RANGE = 4.4; // Comfortable middle ground: close enough to chat without triggering from far away.
 function nearestFriend() {
   let nearest = null, dist = Infinity;
   for (const f of friends) {
@@ -4017,6 +4092,43 @@ function updateAmbientCreatures(dt, now) {
     if (critter.group.userData.tailFin) critter.group.userData.tailFin.rotation.y = gait * 0.52;
   }
 }
+function updatePlayerFlashlight(dt, now) {
+  // Use the game's existing local-time dusk/night transition for the activation threshold;
+  // this avoids requesting location permissions just to drive a small cosmetic feature.
+  const shouldBeOn = nightWeight > 0;
+  const data = player.userData;
+  if (shouldBeOn && !data.flashlightWantsOn) data.flashlightTurnOnAt = now;
+  if (!shouldBeOn) data.flashlightTurnOnAt = null;
+  data.flashlightWantsOn = shouldBeOn;
+
+  const targetBlend = shouldBeOn ? 1 : 0;
+  data.flashlightBlend = THREE.MathUtils.damp(data.flashlightBlend || 0, targetBlend, shouldBeOn ? 3.1 : 2.5, dt);
+  if (!shouldBeOn && data.flashlightBlend < 0.005) data.flashlightBlend = 0;
+  const blend = data.flashlightBlend;
+  const turnOnElapsed = data.flashlightTurnOnAt === null ? Infinity : Math.max(0, (now - data.flashlightTurnOnAt) / 1000);
+  // One soft glint makes the activation read as a tiny turn-on animation, without flashing the whole cherry.
+  const switchPulse = Number.isFinite(turnOnElapsed) && turnOnElapsed < 0.65
+    ? Math.sin((turnOnElapsed / 0.65) * Math.PI) * 0.35
+    : 0;
+
+  const lensMaterial = data.cherryFlashlightLensMaterial;
+  if (lensMaterial) {
+    lensMaterial.opacity = blend * 0.98;
+    lensMaterial.emissiveIntensity = blend * (1.65 + switchPulse);
+  }
+  // Enough focused intensity to visibly brighten standard-material ground and grass at night.
+  playerFlashlight.intensity = blend * 72;
+  playerFlashlightBeamMaterial.opacity = blend * 0.13;
+  // Scale out from the cherry's lens and keep the cone's apex anchored there as it tilts down.
+  const beamScale = Math.max(0.001, blend);
+  playerFlashlightBeam.scale.set(beamScale, beamScale, beamScale);
+  playerFlashlightBeam.position.y = 2.04 - (FLASHLIGHT_BEAM_LENGTH * 0.5 * Math.sin(FLASHLIGHT_BEAM_TILT) * blend);
+  playerFlashlightBeam.position.z = 1.06 + (FLASHLIGHT_BEAM_LENGTH * 0.5 * Math.cos(FLASHLIGHT_BEAM_TILT) * blend);
+  playerFlashlight.visible = blend > 0.005;
+  playerFlashlightBeam.visible = blend > 0.005;
+  if (data.cherryFlashlightLens) data.cherryFlashlightLens.visible = blend > 0.005;
+}
+
 function updateSunShadowAnchor() {
   // Keep the sun direction fixed, but recenter the detail shadow volume around the active play
   // area. Snap to shadow texels to avoid shimmering as the target follows sub-pixel player motion.
@@ -4032,6 +4144,7 @@ function updateSunShadowAnchor() {
 }
 function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
+  updatePlayerFlashlight(dt, now);
   updateWeather(dt, now);
   updateDynamicSky(dt, now);
   updateSpatialChunkLOD(now);
