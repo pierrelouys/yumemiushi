@@ -1,5 +1,14 @@
 # Changelog
 
+## October 17, 2026 — Blue Ridge continuity, collision, and doubled mint progression
+- Reconciled the canonical source and production copy so `src/main.js`, `src/style.css`, and `dist/` are generated from the same version.
+- Rebuilt Blue Ridge switchback junctions as height-matched surface patches, and blended overlapping ramp support heights to eliminate abrupt seam changes across the walkable width.
+- Increased mountain collision footprints to match the visible ridge bases, and retained safe, supported friend placement instead of fixed coordinates that could put Kik/Kiki inside a mountain.
+- Spread the three mountain trampolines along the trail's start, middle, and end, with each at ground level off the elevated tiles.
+- Expanded Water World to 4,000 instanced animated bubbles while keeping triple jump and the rideable mint-following turtle.
+- Made the original twice-required progression the standard run: 60/60/72/84 mints available for goals of 50/50/60/70. Replay doubles pools and goals again to 120/120/144/168 available and 100/100/120/140 required, with counters reset.
+- Added release checks that sample five lanes across all eight mountain ramps, validate ridge collision clearance, confirm the trampoline locations, and verify standard/replay mint totals.
+
 ## Reliable meadow entry
 - Bound the welcome button synchronously in the HTML before the 3D module starts building the meadow, so early mobile taps are queued instead of lost.
 - Connected the queued action to the game's start function after scene and controls initialization, and removed the later-only duplicate click handler.

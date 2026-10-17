@@ -8,10 +8,10 @@ const $ = (selector) => document.querySelector(selector);
 const canvas = $('#game-canvas');
 const scene = new THREE.Scene();
 let worldMode = 'meadow';
-const MEADOW_MINT_REQUIREMENT = 25;
-const WATER_MINT_REQUIREMENT = 25;
-const BRIDGE_MINT_REQUIREMENT = 30;
-const MOUNTAIN_MINT_REQUIREMENT = 35;
+const MEADOW_MINT_REQUIREMENT = 50;
+const WATER_MINT_REQUIREMENT = 50;
+const BRIDGE_MINT_REQUIREMENT = 60;
+const MOUNTAIN_MINT_REQUIREMENT = 70;
 const MINT_CUSHION = 1.2;
 const MEADOW_MINT_TOTAL = Math.ceil(MEADOW_MINT_REQUIREMENT * MINT_CUSHION);
 const WATER_MINT_TOTAL = Math.ceil(WATER_MINT_REQUIREMENT * MINT_CUSHION);
@@ -1192,7 +1192,7 @@ for (let i = 0; i < 22; i++) {
 // A large, world-wide population of touchable bubbles uses one instanced draw call for mobile performance.
 const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.48, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
 const underwaterBubbleGeometry = new THREE.SphereGeometry(1, 10, 8);
-const UNDERWATER_BUBBLE_COUNT = 520;
+const UNDERWATER_BUBBLE_COUNT = 4000;
 const underwaterBubbleMesh = new THREE.InstancedMesh(underwaterBubbleGeometry, underwaterBubbleMaterial, UNDERWATER_BUBBLE_COUNT);
 underwaterBubbleMesh.frustumCulled = false; underwaterBubbleMesh.visible = false; waterWorld.add(underwaterBubbleMesh);
 const underwaterBubbles = [];
@@ -1349,13 +1349,18 @@ const seaMintBodyMat = new THREE.MeshStandardMaterial({ color: '#55dce5', map: p
 const seaMintEdgeMat = new THREE.MeshStandardMaterial({ color: '#b7fbf8', roughness: 0.45, metalness: 0.04, emissive: '#5adfe5', emissiveIntensity: 0.2 });
 const seaMintSpiralMat = new THREE.MeshBasicMaterial({ color: '#f4ffed', toneMapped: false });
 const seaMintGlowMat = new THREE.MeshBasicMaterial({ color: '#a4fff5', transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
-const seaMintSpots = [
+const baseSeaMintSpots = [
   [-76,-65],[-51,-74],[-24,-78],[13,-77],[48,-69],[77,-54],
   [-84,-25],[-56,-22],[-32,-41],[29,-35],[58,-26],[82,-12],
   [-78,12],[-48,29],[-17,42],[15,22],[45,39],[73,32],
   [-65,66],[-28,73],[18,67],[57,72],[-4,-5],[3,52],[35,-57],
   [-94,48],[93,47],[-91,-51],[88,67],[67,-91],
 ];
+// A second offset/rotated sweep fills the wide ocean without simply piling mint pairs together.
+const seaMintSpots = [...baseSeaMintSpots, ...baseSeaMintSpots.map(([x,z], i) => [
+  THREE.MathUtils.clamp(-z * 0.92 + ((i % 3) - 1) * 4.5, -96, 96),
+  THREE.MathUtils.clamp(x * 0.92 + ((i % 4) - 1.5) * 3.5, -96, 96),
+])];
 if (seaMintSpots.length !== WATER_MINT_TOTAL) throw new Error(`Water World should contain ${WATER_MINT_TOTAL} sea mints (20% cushion); found ${seaMintSpots.length}`);
 for (let i = 0; i < seaMintSpots.length; i++) {
   const [x, z] = seaMintSpots[i];
@@ -1381,6 +1386,102 @@ for (let i = 0; i < seaMintSpots.length; i++) {
   waterMints.push({ group, x, z, baseY: group.position.y, phase: waterRand() * Math.PI * 2, collected: false });
 }
 if (waterMints.length !== WATER_MINT_TOTAL || waterMints.length < WATER_MINT_REQUIREMENT) throw new Error(`Water World created ${waterMints.length} collectibles; ${WATER_MINT_TOTAL} expected and ${WATER_MINT_REQUIREMENT} required.`);
+
+
+// A friendly giant sea turtle can be boarded by landing on its broad shell.
+// While aboard, it slowly steers toward the nearest uncollected Seafoam Mint.
+const seaTurtle = (() => {
+  const group = new THREE.Group(); group.position.set(0, 0, 4); waterWorld.add(group);
+  const skin = new THREE.MeshStandardMaterial({ color:'#4b9b83', roughness:0.86, bumpMap:meadowGrassBump, bumpScale:0.045 });
+  const flipperMat = new THREE.MeshStandardMaterial({ color:'#62b69a', roughness:0.9, bumpMap:ivoryBump, bumpScale:0.035 });
+  const shellMat = new THREE.MeshStandardMaterial({ color:'#40795a', roughness:0.8, bumpMap:stoneBumpTexture, bumpScale:0.11, metalness:0.025 });
+  const shellRimMat = new THREE.MeshStandardMaterial({ color:'#b3ca83', roughness:0.88 });
+  const bellyMat = new THREE.MeshStandardMaterial({ color:'#c6d9a2', roughness:0.95 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1,22,14),skin); body.position.set(0,0.63,0); body.scale.set(2.8,0.68,3.45); body.castShadow=true; group.add(body);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(1,24,12),bellyMat); belly.position.set(0,0.55,0); belly.scale.set(2.8,0.42,3.0); group.add(belly);
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(1,36,18,0,Math.PI*2,0,Math.PI/2),shellMat);
+  shell.position.set(0,0.77,0); shell.scale.set(4.15,1.67,3.25); shell.castShadow=true; shell.receiveShadow=true; group.add(shell);
+  // Pale seam pattern follows the dome like a real segmented turtle shell.
+  const scutePositions = [[0,0],[-1.55,0],[1.55,0],[-0.78,-1.25],[0.78,-1.25],[-0.78,1.25],[0.78,1.25]];
+  for (let i=0;i<scutePositions.length;i++) {
+    const [x,z] = scutePositions[i]; const q=(x/4.15)**2+(z/3.25)**2;
+    const seam = new THREE.Mesh(new THREE.TorusGeometry(i===0?0.78:0.62,0.035,6,28),shellRimMat);
+    seam.rotation.x=Math.PI/2; seam.position.set(x,0.77+1.67*Math.sqrt(Math.max(0.12,1-q))+0.012,z); group.add(seam);
+  }
+  const flippers=[];
+  for (const side of [-1,1]) for (const fore of [-1,1]) {
+    const f = new THREE.Mesh(new THREE.SphereGeometry(1,16,11),flipperMat);
+    f.position.set(side*2.85,0.48,fore*1.95); f.scale.set(1.18,0.25,0.72); f.rotation.y=side*fore*0.38; f.castShadow=true; group.add(f); flippers.push({mesh:f,side,fore,base:f.rotation.z});
+    for (let claw=0;claw<2;claw++) {
+      const nail = new THREE.Mesh(new THREE.ConeGeometry(0.10,0.25,6),bellyMat);
+      nail.position.set(side*3.52,0.42,fore*1.95+(claw?0.22:-0.22)); nail.rotation.z=side*Math.PI/2; group.add(nail);
+    }
+  }
+  const head = new THREE.Mesh(new THREE.SphereGeometry(1,20,14),skin); head.position.set(0,0.94,3.55); head.scale.set(0.92,0.76,1.05); head.castShadow=true; group.add(head);
+  const eyeMat = new THREE.MeshStandardMaterial({ color:'#183e36', roughness:0.55 });
+  const eyeShine = new THREE.MeshBasicMaterial({ color:'#ffffff' });
+  for (const side of [-1,1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.105,12,8),eyeMat); eye.position.set(side*0.56,1.18,4.17); group.add(eye);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.035,8,6),eyeShine); shine.position.set(side*0.585,1.22,4.235); group.add(shine);
+  }
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.32,0.9,8),skin); tail.position.set(0,0.65,-3.55); tail.rotation.x=-Math.PI/2; group.add(tail);
+  return { group, flippers, heading:0, vx:0, vz:0, target:null, phase:Math.random()*6.28, topY:2.44, riderOffsetZ:-0.15 };
+})();
+function seaTurtleSurfaceAt(x,z) {
+  const dx=x-seaTurtle.group.position.x, dz=z-seaTurtle.group.position.z;
+  const c=Math.cos(seaTurtle.heading),sn=Math.sin(seaTurtle.heading);
+  const lx=dx*c-dz*sn, lz=dx*sn+dz*c;
+  const q=(lx/4.02)**2+(lz/3.04)**2;
+  if(q>0.92) return null;
+  return seaTurtle.group.position.y+0.77+1.67*Math.sqrt(Math.max(0,1-q))+0.025;
+}
+function updateSeaTurtle(dt,now) {
+  if(worldMode!=='water') return;
+  if(state.started && !state.paused && !state.finale.active) {
+    let desiredX=0,desiredZ=0;
+    // Stay still enough to board until the player lands on the shell. Once ridden, the turtle
+    // follows the nearest remaining Seafoam Mint, then heads for another if the player collects it.
+    if(state.ridingTurtle) {
+      let target=seaTurtle.target;
+      if(!target || target.collected || !target.group.visible || Math.hypot(target.x-seaTurtle.group.position.x,target.z-seaTurtle.group.position.z)<4.0) {
+        let bestDist=Infinity; target=null;
+        for(const mint of waterMints) if(!mint.collected && mint.group.visible) {
+          const dist=Math.hypot(mint.x-seaTurtle.group.position.x,mint.z-seaTurtle.group.position.z);
+          if(dist>3.5 && dist<bestDist){bestDist=dist;target=mint;}
+        }
+        seaTurtle.target=target;
+      }
+      if(target) {
+        const dx=target.x-seaTurtle.group.position.x,dz=target.z-seaTurtle.group.position.z,dist=Math.hypot(dx,dz)||1;
+        if(dist>2.4){desiredX=dx/dist*2.75;desiredZ=dz/dist*2.75;seaTurtle.heading=Math.atan2(dx,dz);}
+        else {desiredX=Math.sin(now*0.0005)*0.35;desiredZ=Math.cos(now*0.00055)*0.35;}
+      }
+    } else {
+      seaTurtle.target=null;
+    }
+    const smoothing=1-Math.exp(-dt*(state.ridingTurtle?1.8:2.8));
+    seaTurtle.vx+=(desiredX-seaTurtle.vx)*smoothing; seaTurtle.vz+=(desiredZ-seaTurtle.vz)*smoothing;
+    seaTurtle.group.position.x=THREE.MathUtils.clamp(seaTurtle.group.position.x+seaTurtle.vx*dt,-92,92);
+    seaTurtle.group.position.z=THREE.MathUtils.clamp(seaTurtle.group.position.z+seaTurtle.vz*dt,-92,92);
+    seaTurtle.group.position.y=0.035+Math.sin(now*0.0021+seaTurtle.phase)*0.065;
+  }
+  seaTurtle.group.rotation.y=seaTurtle.heading;
+  for(const [i,flipper] of seaTurtle.flippers.entries()) {
+    flipper.mesh.rotation.z=flipper.base+Math.sin(now*0.0042+seaTurtle.phase+(flipper.fore>0?0:Math.PI)+(flipper.side>0?0.8:0))*0.24;
+    flipper.mesh.rotation.x=Math.sin(now*0.0032+i*1.7)*0.08;
+  }
+  seaTurtle.group.children[seaTurtle.group.children.length-1].rotation.z=Math.sin(now*0.003+seaTurtle.phase)*0.11;
+}
+function resolveSeaTurtleBodyCollision() {
+  if(worldMode!=='water' || state.ridingTurtle || state.y>1.6) return;
+  const dx=state.x-seaTurtle.group.position.x,dz=state.z-seaTurtle.group.position.z;
+  const c=Math.cos(seaTurtle.heading),sn=Math.sin(seaTurtle.heading),lx=dx*c-dz*sn,lz=dx*sn+dz*c;
+  const q=(lx/4.25)**2+(lz/3.35)**2;
+  if(q>=1) return;
+  let nx=dx,nz=dz,dist=Math.hypot(nx,nz)||0.001; nx/=dist;nz/=dist;
+  state.x=seaTurtle.group.position.x+nx*4.45; state.z=seaTurtle.group.position.z+nz*3.55;
+  const into=state.vx*nx+state.vz*nz;if(into<0){state.vx-=nx*into;state.vz-=nz*into;}
+}
 
 // --- Bridge World: an ivy-draped, stacked timber maze with vertical progression ------------------
 const bridgeWorld = new THREE.Group(); bridgeWorld.visible = false; scene.add(bridgeWorld);
@@ -1488,10 +1589,10 @@ const bridgeMintMaterial = new THREE.MeshStandardMaterial({ color: '#b9f0a1', ma
 const bridgeMintRimMaterial = new THREE.MeshStandardMaterial({ color: '#f1ffd8', roughness: 0.46, metalness: 0.05 });
 const bridgeMintSpots = [];
 bridgePlatforms.forEach((platform) => {
-  // Four per deck (36 total), spaced along each bridge so the 30-mint goal has a 20% cushion.
-  const locals = [-platform.length * 0.36, -platform.length * 0.12, platform.length * 0.12, platform.length * 0.36];
+  // Eight per deck: ample optional pickups for the doubled campaign requirement.
+  const locals = [-0.41,-0.30,-0.19,-0.08,0.08,0.19,0.30,0.41].map(t => platform.length * t);
   locals.forEach((lx, j) => {
-    const point = localBridgePoint(platform, lx, j % 2 ? 0.32 : -0.28);
+    const point = localBridgePoint(platform, lx, j % 2 ? 0.48 : -0.48);
     bridgeMintSpots.push([point.x, point.z, platform.y]);
   });
 });
@@ -1541,13 +1642,15 @@ const mountainRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bump
 const mountainShadowRockMat = new THREE.MeshStandardMaterial({ map: stoneTexture, bumpMap: stoneBumpTexture, bumpScale: 0.20, color: '#506e88', roughness: 1 });
 const mountainSnowMat = new THREE.MeshStandardMaterial({ color: '#edf3ec', roughness: 0.98, bumpMap: stoneBumpTexture, bumpScale: 0.04 });
 // Distinct layered blue ridges form the skyline, unrelated to any real-world mountain range.
+const mountainSolidColliders = [];
 const ridgePeaks = [
-  [-86,-78,28,62],[-59,-93,33,74],[-27,-101,25,52],[10,-102,38,82],[49,-98,30,68],[82,-81,25,56],
+  [-86,-78,28,62],[-59,-122,33,74],[-27,-132,25,52],[10,-139,38,82],[49,-125,30,68],[82,-81,25,56],
   [-96,-24,22,46],[96,-17,24,48],[-89,40,26,52],[87,42,22,43],
 ];
 for (const [x,z,r,h] of ridgePeaks) {
   const ridge = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 2), mountainRockMat);
   ridge.position.set(x, h * 0.48 - 1.1, z); ridge.rotation.y = rand() * Math.PI; ridge.scale.set(1.22,1,0.76); ridge.castShadow = true; ridge.receiveShadow = true; mountainWorld.add(ridge);
+  mountainSolidColliders.push({ kind:'ellipse', x, z, rx:r*1.22, rz:r*0.76, topY:h-0.8 });
   if (h > 58) {
     const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.40, h * 0.23, 7, 1), mountainSnowMat);
     cap.position.set(x * 0.99, h * 0.80, z); cap.rotation.y = ridge.rotation.y; cap.scale.set(1.16,1,0.77); mountainWorld.add(cap);
@@ -1582,6 +1685,11 @@ function addMountainRamp(startNode, endNode, index) {
   mountainTrailSegments.push({start:startNode,end:endNode,width,ramp});
 }
 for (let i=0;i<mountainTrailNodes.length-1;i++) addMountainRamp(mountainTrailNodes[i],mountainTrailNodes[i+1],i);
+// Flat, solid stone junctions overlap every ramp end. They eliminate the corner gaps that
+// used to let the player fall between switchbacks even though the ramp endpoints touched.
+const mountainJunctionMaterial = new THREE.MeshStandardMaterial({ map:stoneTexture, bumpMap:stoneBumpTexture, bumpScale:0.16, color:'#7d9aae', roughness:0.96, side:THREE.DoubleSide });
+const mountainJunctionShadowMaterial = new THREE.MeshStandardMaterial({ map:stoneTexture, bumpMap:stoneBumpTexture, bumpScale:0.18, color:'#617e92', roughness:0.98, side:THREE.DoubleSide });
+const mountainJunctions = mountainTrailNodes.map(node=>({node,half:7.0,mesh:null}));
 function mountainPointOnSegment(segment,t,sideOffset=0) {
   const a=segment.start,b=segment.end,dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;
   const offX=(-dz/len)*sideOffset,offZ=(dx/len)*sideOffset;
@@ -1589,34 +1697,133 @@ function mountainPointOnSegment(segment,t,sideOffset=0) {
 }
 function mountainSurfaceAt(segment,x,z) {
   const a=segment.start,b=segment.end,dx=b.x-a.x,dz=b.z-a.z,len2=dx*dx+dz*dz;
-  const t=((x-a.x)*dx+(z-a.z)*dz)/(len2||1);
-  if(t<0 || t>1) return null;
-  const cross=Math.abs((x-a.x)*dz-(z-a.z)*dx)/(Math.sqrt(len2)||1);
-  if(cross>segment.width/2+0.65) return null;
-  return {y:a.y+(b.y-a.y)*t,t,cross};
+  const len=Math.sqrt(len2)||1;
+  const rawT=((x-a.x)*dx+(z-a.z)*dz)/(len2||1);
+  const t=THREE.MathUtils.clamp(rawT,0,1);
+  // Overlapped two-unit end caps make every adjacent ledge a continuous walkable seam.
+  const endOverrun=Math.abs(rawT-t)*len;
+  if(endOverrun>2.25) return null;
+  const px=a.x+dx*t,pz=a.z+dz*t;
+  const cross=Math.hypot(x-px,z-pz);
+  if(cross>segment.width/2+0.35) return null;
+  return {y:a.y+(b.y-a.y)*t,t:rawT,cross,endOverrun,segment};
+}
+function findMountainSurfaceAt(x,z) {
+  const hits=[];
+  let weightedY=0,weightSum=0,closestHit=null;
+  for(const segment of mountainTrailSegments) {
+    const hit=mountainSurfaceAt(segment,x,z);
+    if(!hit) continue;
+    hits.push(hit);
+    if(!closestHit || hit.cross<closestHit.cross) closestHit=hit;
+    // Smoothly blend overlapping ramp planes. A ramp's weight fades to zero at its edge,
+    // so moving across a switchback cannot switch abruptly from one ramp height to another.
+    const edge=segment.width/2+0.35;
+    const proximity=THREE.MathUtils.clamp(1-hit.cross/edge,0,1);
+    const weight=proximity*proximity;
+    weightedY+=hit.y*weight; weightSum+=weight;
+  }
+  const junction=mountainJunctions.find(item=>Math.abs(x-item.node.x)<=item.half && Math.abs(z-item.node.z)<=item.half);
+  if(junction) {
+    // Connector-plane influence fades toward the patch boundary, preserving continuity with
+    // the ramp outside the corner while filling the inside of each switchback.
+    const edgeDistance=Math.max(Math.abs(x-junction.node.x),Math.abs(z-junction.node.z))/junction.half;
+    const nodeWeight=0.16*Math.pow(Math.max(0,1-edgeDistance),2);
+    weightedY+=junction.node.y*nodeWeight; weightSum+=nodeWeight;
+  }
+  if(weightSum>1e-8) return {...(closestHit||{}),y:weightedY/weightSum,junction};
+  if(junction) return {y:junction.node.y,t:0,cross:0,endOverrun:0,segment:null,junction};
+  return null;
 }
 function mountainSupportBelow(x,z,y) {
-  let support=0;
-  for(const segment of mountainTrailSegments) { const hit=mountainSurfaceAt(segment,x,z); if(hit && hit.y<=y+0.035 && hit.y>support) support=hit.y; }
-  return support;
+  const hit=findMountainSurfaceAt(x,z);
+  return hit && hit.y<=y+0.20 ? hit.y : 0;
 }
 function findMountainLanding(oldY,newY,x,z) {
   if(worldMode!=='mountain' || state.vy>0) return null;
-  let landing=null;
-  for(const segment of mountainTrailSegments) {
-    const hit=mountainSurfaceAt(segment,x,z); if(!hit) continue;
-    if(oldY>=hit.y-0.04 && newY<=hit.y+0.02 && (!landing || hit.y>landing.y)) landing={y:hit.y,segment};
+  const hit=findMountainSurfaceAt(x,z);
+  if(hit && oldY>=hit.y-0.12 && newY<=hit.y+0.10) return {y:hit.y,segment:hit.segment};
+  return null;
+}
+// Build each switchback connector as a height-matched stone patch rather than a flat box.
+// Its vertices sample the same collision surface used by the player, so the visible trail and
+// walkable height field stay aligned without a slab protruding through the character.
+for(let junctionIndex=0;junctionIndex<mountainJunctions.length;junctionIndex++) {
+  const junction=mountainJunctions[junctionIndex], divisions=8, positions=[], indices=[];
+  for(let row=0;row<=divisions;row++) for(let col=0;col<=divisions;col++) {
+    const lx=-junction.half+(2*junction.half*col/divisions), lz=-junction.half+(2*junction.half*row/divisions);
+    const hit=findMountainSurfaceAt(junction.node.x+lx,junction.node.z+lz);
+    const y=hit?.y??junction.node.y;
+    positions.push(lx,y-junction.node.y+0.012,lz);
   }
-  return landing;
+  for(let row=0;row<divisions;row++) for(let col=0;col<divisions;col++) {
+    const a=row*(divisions+1)+col,b=a+1,c=a+divisions+1,d=c+1;
+    indices.push(a,c,b,b,c,d);
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3)); geometry.setIndex(indices); geometry.computeVertexNormals();
+  const mesh=new THREE.Mesh(geometry,junctionIndex%2===0?mountainJunctionMaterial:mountainJunctionShadowMaterial);
+  mesh.position.set(junction.node.x,junction.node.y,junction.node.z); mesh.receiveShadow=true; mesh.castShadow=false; mountainWorld.add(mesh); junction.mesh=mesh;
+}
+function isMountainSpawnClear(x,z) {
+  for(const block of mountainSolidColliders) {
+    if(block.kind==='ellipse') {
+      const q=((x-block.x)/(block.rx*1.10))**2+((z-block.z)/(block.rz*1.10))**2;
+      if(q<1) return false;
+    } else if(Math.hypot(x-block.x,z-block.z)<block.radius+1.15) return false;
+  }
+  return true;
+}
+function resolveMountainSolidCollision() {
+  if(worldMode!=='mountain') return;
+  for(const block of mountainSolidColliders) {
+    if(state.y>block.topY+0.3) continue;
+    if(block.kind==='ellipse') {
+      let dx=state.x-block.x,dz=state.z-block.z;
+      let nx=dx/(block.rx||1),nz=dz/(block.rz||1),q=Math.hypot(nx,nz);
+      // Ridge walls are solid; keep the player outside the cone's footprint.
+      const required=1.035;
+      if(q>=required) continue;
+      if(q<0.001){nx=1;nz=0;q=1;}
+      const length=Math.hypot(nx,nz)||1; nx/=length; nz/=length;
+      state.x=block.x+nx*block.rx*required;
+      state.z=block.z+nz*block.rz*required;
+      const into=state.vx*nx+state.vz*nz;
+      if(into<0){state.vx-=nx*into;state.vz-=nz*into;}
+    } else {
+      let dx=state.x-block.x,dz=state.z-block.z,dist=Math.hypot(dx,dz);
+      if(dist<0.001){dx=1;dz=0;dist=1;}
+      const min=block.radius+0.95;
+      if(dist>=min) continue;
+      const nx=dx/dist,nz=dz/dist; state.x=block.x+nx*min; state.z=block.z+nz*min;
+      const into=state.vx*nx+state.vz*nz; if(into<0){state.vx-=nx*into;state.vz-=nz*into;}
+    }
+  }
+}
+function resolveMountainTrailMovement(oldX,oldY,oldZ,oldVy) {
+  if(worldMode!=='mountain') return;
+  const oldSurface=findMountainSurfaceAt(oldX,oldZ);
+  const newSurface=findMountainSurfaceAt(state.x,state.z);
+  const wasGrounded=oldVy<=0.05 && state.vy<=0.05 && ((oldSurface && oldY>=oldSurface.y-0.32 && oldY<=oldSurface.y+0.34) || (!oldSurface && oldY<=0.05));
+  if(wasGrounded && newSurface) {
+    const rise=newSurface.y-oldY;
+    // Follow the rock ramp while walking. Per-frame slope steps are tiny; the generous
+    // seam cap catches the two switchback transitions that previously let feet fall through.
+    if(rise<=0.65 && rise>=-1.4) { state.y=newSurface.y; state.vy=0; }
+  } else if(state.vy<=0 && newSurface && oldY>=newSurface.y-0.15 && state.y<=newSurface.y+0.10) {
+    state.y=newSurface.y; state.vy=0;
+  }
+  resolveMountainSolidCollision();
 }
 // Rock outcrops flank the path but leave its middle open for walking and collecting.
 for (let i=0;i<mountainTrailSegments.length;i++) {
   const seg=mountainTrailSegments[i];
   for (const t of [0.30,0.72]) for (const side of [-1,1]) {
-    const pt=mountainPointOnSegment(seg,t,side*(seg.width/2+2.2+rand()*1.5));
     const size=1.05+rand()*1.65;
+    const pt=mountainPointOnSegment(seg,t,side*(seg.width/2+size*1.25+1.25));
     const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(1,1),i%2?mountainRockMat:mountainShadowRockMat);
     rock.position.set(pt.x,pt.y+size*0.52-0.1,pt.z); rock.scale.set(size*1.25,size*0.9,size); rock.rotation.set(rand()*0.3,rand()*Math.PI,rand()*0.28); rock.castShadow=true; rock.receiveShadow=true; mountainWorld.add(rock);
+    mountainSolidColliders.push({kind:'rock',x:pt.x,z:pt.z,radius:size*0.82,topY:pt.y+size*0.95});
   }
 }
 const mountainCritterWorld = new THREE.Group(); mountainWorld.add(mountainCritterWorld);
@@ -1817,7 +2024,7 @@ const pearlMaterial = [
   new THREE.MeshPhysicalMaterial({ color: '#d8fff3', emissive: '#c7fff0', emissiveIntensity: 0.15, roughness: 0.16, clearcoat: 1 }),
   new THREE.MeshPhysicalMaterial({ color: '#ffd4d8', emissive: '#ffd4d8', emissiveIntensity: 0.12, roughness: 0.18, clearcoat: 1 }),
 ];
-const pearlSpots = [
+const basePearlSpots = [
   [-5, 9, 2.0], [7, 1, 1.8], [13, -6, 3.5], [25, -3, 1.5], [11, -24, 2.4],
   [-10, -14, 3.0], [-28, -6, 1.6], [-31, 24, 2.4], [-17, 31, 1.3], [1, 28, 3.3],
   [26, 38, 2.0], [48, 17, 1.4], [50, -15, 3.6], [45, -52, 1.7], [5, -55, 2.9],
@@ -1825,6 +2032,10 @@ const pearlSpots = [
   [-5, 55, 2.7], [20, 55, 1.5], [56, 50, 3.0], [70, 9, 1.8], [-68, -70, 2.6],
   [-84, 23, 2.2], [39, -43, 2.55], [3, -82, 2.15], [82, 58, 2.4], [-22, 79, 1.9],
 ];
+const pearlSpots = [...basePearlSpots, ...basePearlSpots.map(([x,z,y], i) => {
+  const a = i * 2.399963229728653, r = 15 + (i % 4) * 4.5;
+  return [THREE.MathUtils.clamp(x + Math.cos(a) * r, -94, 94), THREE.MathUtils.clamp(z + Math.sin(a) * r, -94, 94), Math.max(1.2, y * (0.72 + (i % 5) * 0.075))];
+})];
 if (pearlSpots.length !== MEADOW_MINT_TOTAL) throw new Error(`Meadow should contain ${MEADOW_MINT_TOTAL} field Fizz pearls (20% cushion); found ${pearlSpots.length}`);
 const pearls = pearlSpots.map(([x, z, y], i) => {
   const g = new THREE.Group();
@@ -1934,9 +2145,11 @@ function addMountainTrampoline(x, z, accent = '#9ddfff') {
   const pad = { group, x, z, radius: 3.0, topY: 0.48, top, rim, topBaseY: top.position.y, rimBaseY: rim.position.y, lastBounceAt: -10000, lastSoundAt: -10000, phase: rand() * Math.PI * 2 };
   mountainTrampolines.push(pad); return pad;
 }
-addMountainTrampoline(-10, 87, '#92d8ff');
-addMountainTrampoline(0, 88, '#bee8ff');
-addMountainTrampoline(10, 87, '#86c7ed');
+// Ground-level pads sit just outside the 6.6-unit half-width of the raised trail:
+// one just off the trailhead, one beside the middle switchback, and one beside the summit approach.
+addMountainTrampoline(6.02, 71.70, '#92d8ff');
+addMountainTrampoline(2.80, 8.00, '#bee8ff');
+addMountainTrampoline(9.00, -83.66, '#86c7ed');
 function activeTrampolineSet() { return worldMode === 'mountain' ? mountainTrampolines : (worldMode === 'meadow' ? trampolines : []); }
 function findTrampolineAt(x, z) {
   for (const pad of activeTrampolineSet()) if (Math.hypot(x - pad.x, z - pad.z) <= pad.radius) return pad;
@@ -1962,7 +2175,7 @@ const state = {
   vx: 0, vy: 0, vz: 0, yaw: Math.PI, knockbackUntil: 0,
   pearls: 0, waterMintsCollected: 0, bridgeMintsCollected: 0, mountainMintsCollected: 0, score: 0, friendsMet: 0, elapsed: 0, soundOn: true,
   mintGiftClaimed: false, stageAwaitingTap: false,
-  trampolineReadyUntil: 0, trampolineLaunchUntil: 0, waterJumpsUsed: 0,
+  trampolineReadyUntil: 0, trampolineLaunchUntil: 0, waterJumpsUsed: 0, ridingTurtle: false,
   highJumpUntil: 0, highJumpWasActive: false, bridgeStageComplete: false,
   activeFriend: null, activeDialogueLines: null, toastUntil: 0, bob: 0,
   finale: { active: false, targetWorld: 'water', startAt: 0, baseYaw: Math.PI, camOffset: new THREE.Vector3(7.8, 7.2, 12.4), fovStart: 55, enteredWater: false, overlayShown: false },
@@ -1984,6 +2197,18 @@ let rainNoiseGain = null, windNoiseGain = null;
 let musicNextTime = 0, musicStep = 0, nextUnderwaterBloop = 0;
 let stageMusicElement = null, stageMusicWorld = null, stageMusicMode = 'idle', stageMusicToken = 0;
 let replayMintPoolsExpanded = false, replayMode = false;
+function mintRequirementFor(stage) {
+  const standard = stage === 'meadow' ? MEADOW_MINT_REQUIREMENT : (stage === 'water' ? WATER_MINT_REQUIREMENT : (stage === 'bridge' ? BRIDGE_MINT_REQUIREMENT : MOUNTAIN_MINT_REQUIREMENT));
+  return standard * (replayMode ? 2 : 1);
+}
+function stageMintList(stage) { return stage === 'meadow' ? pearls : (stage === 'water' ? waterMints : (stage === 'bridge' ? bridgeMints : mountainMints)); }
+function stageMintLabel(stage) { return stage === 'meadow' ? 'FIZZ MINTS' : (stage === 'water' ? 'SEAFOAM MINTS' : (stage === 'bridge' ? 'BRIDGE MINTS' : 'FRESH MINTS')); }
+function refreshStageGoal(stage = worldMode) {
+  const list = stageMintList(stage), required = mintRequirementFor(stage), label = stageMintLabel(stage);
+  const suffix = stage === 'mountain' ? ' to reach the summit' : ' to progress';
+  $('#stage-goal').textContent = `${label} · Collect ${required} of ${list.length}${suffix}`;
+  return { required, available: list.length, label };
+}
 
 // Rain is localised around the player so it remains light enough for mobile GPUs.
 const RAIN_COUNT = 240;
@@ -2442,7 +2667,7 @@ function claimSavedMintGift(friend) {
   sparkle(new THREE.Vector3(friend.x, (friend.worldFloorY || 0) + 2.2, friend.z), 18);
   sfx(1040, 0.12, 'sine', 0.13); setTimeout(() => sfx(1380, 0.14, 'triangle', 0.11), 65);
   updateHUD(); toast('Berry gave you a saved Fizz Mint!');
-  if (state.pearls >= MEADOW_MINT_REQUIREMENT) { closeDialogue(); startFizzFinale(); return true; }
+  if (state.pearls >= mintRequirementFor('meadow')) { closeDialogue(); startFizzFinale(); return true; }
   return false;
 }
 function advanceDialogue() {
@@ -2459,6 +2684,10 @@ function jumpOrInteract() {
   if (state.activeFriend) { advanceDialogue(); return false; }
   const now = performance.now();
   const supportY = playerSupportBelow(state.x, state.z, state.y);
+  if (worldMode === 'water' && state.ridingTurtle) {
+    state.ridingTurtle = false; state.vy = 9.2; state.waterJumpsUsed = 1;
+    spawnWaterJumpBubbles(); spawnSandPuff(); sfx(590,0.11,'sine',0.10); toast('Hop off the turtle!'); return true;
+  }
   // In Water World, each fresh press while airborne consumes the next jump in a triple-jump chain.
   if (worldMode === 'water' && state.y > supportY + 0.28 && state.waterJumpsUsed < 3) {
     state.waterJumpsUsed++;
@@ -2516,7 +2745,7 @@ function enterWaterWorld(now) {
   for (const pearl of pearls) { pearl.collected = true; pearl.group.visible = false; }
   state.stageAwaitingTap = true; state.paused = true;
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Dive into the Water World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
-  state.friendsMet = 0; state.waterJumpsUsed = 0; state.trampolineReadyUntil = 0; state.trampolineLaunchUntil = 0;
+  state.friendsMet = 0; state.waterJumpsUsed = 0; state.ridingTurtle = false; state.trampolineReadyUntil = 0; state.trampolineLaunchUntil = 0;
   for (const friend of friends) friend.met = false;
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
   for (const obj of [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects]) obj.visible = false;
@@ -2544,8 +2773,8 @@ function enterWaterWorld(now) {
   const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'WATER WORLD MAP';
   $('#finale-kicker').textContent = 'WELCOME BELOW THE WAVES';
   $('#finale-title').textContent = 'The Water World';
-  $('#finale-subtitle').textContent = 'Collect 25 Seafoam Mints to unlock Bridge World. There are 30 to find, so you can leave a few behind.';
-  $('#stage-goal').textContent = 'SEAFOAM MINTS · Collect 25 of 30 to progress';
+  const waterGoal = refreshStageGoal('water');
+  $('#finale-subtitle').textContent = `Collect ${waterGoal.required} Seafoam Mints to unlock Bridge World. There are ${waterGoal.available} to find, so you can leave some behind.`;
   sfx(330, 0.45, 'sine', 0.11); setTimeout(() => sfx(440, 0.32, 'sine', 0.08), 170);
   // Replays carry doubled mint pools forward, activating the next world's fresh pool on arrival.
   if (replayMode) { setReplayCollectibleVisibility('water'); updateHUD(); }
@@ -2560,7 +2789,7 @@ function enterBridgeWorld(now) {
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Explore Bridge World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
   const spawnPlatform = bridgePlatforms[0];
   state.x = spawnPlatform.x; state.y = spawnPlatform.y; state.z = spawnPlatform.z; state.vx = state.vy = state.vz = 0; state.yaw = Math.PI;
-  state.highJumpUntil = 0; state.highJumpWasActive = false; state.waterJumpsUsed = 0; state.bridgeMintsCollected = 0; state.bridgeStageComplete = false;
+  state.highJumpUntil = 0; state.highJumpWasActive = false; state.waterJumpsUsed = 0; state.ridingTurtle = false; state.bridgeMintsCollected = 0; state.bridgeStageComplete = false;
   if (player.userData.cherryMesh) player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor);
   state.friendsMet = 0;
   const meadowObjects = [meadowBase, meadow, meadowBlades, mossPatches, stoneInstances, pebbleInstances, petalMesh, flowerCenterMesh, flowerStemMesh, safetyGround, grassBlades, ...landDecorationObjects, ...landBoundaryObjects];
@@ -2601,8 +2830,8 @@ function enterBridgeWorld(now) {
   const mapTitle = document.querySelector('.map-heading b'); if (mapTitle) mapTitle.textContent = 'BRIDGE WORLD MAP';
   $('#finale-kicker').textContent = 'WELCOME TO THE CANOPY';
   $('#finale-title').textContent = 'Bridge World';
-  $('#finale-subtitle').textContent = 'Collect 30 Bridge Mints to reach Blue Ridge Mountain. There are 36 across the bridges, so you can leave a few behind.';
-  $('#stage-goal').textContent = 'BRIDGE MINTS · Collect 30 of 36 to progress';
+  const bridgeGoal = refreshStageGoal('bridge');
+  $('#finale-subtitle').textContent = `Collect ${bridgeGoal.required} Bridge Mints to reach Blue Ridge Mountain. There are ${bridgeGoal.available} across the bridges, so you can leave some behind.`;
   scene.fog = new THREE.Fog('#8aab8c', 100, 265);
   hemi.color.set('#e4f4d7'); hemi.groundColor.set('#29442e'); fillLight.color.set('#c8e6ba');
   shadow.material.color.set('#223c28'); shadow.material.opacity = 0.29;
@@ -2619,7 +2848,7 @@ function enterMountainWorld(now) {
   for(const mint of bridgeMints){mint.collected=true;mint.group.visible=false;}
   state.stageAwaitingTap=true; state.paused=true;
   const arrivalButton=$('#stage-continue-button'); arrivalButton.innerHTML='Climb Blue Ridge Mountain <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
-  state.mountainMintsCollected=0; state.bridgeStageComplete=false; state.waterJumpsUsed=0; state.highJumpUntil=0; state.highJumpWasActive=false;
+  state.mountainMintsCollected=0; state.bridgeStageComplete=false; state.waterJumpsUsed=0; state.ridingTurtle=false; state.highJumpUntil=0; state.highJumpWasActive=false;
   if(player.userData.cherryMesh){player.userData.cherryMesh.material.color.copy(player.userData.cherryBaseColor); if(player.userData.cherryMesh.material.emissive)player.userData.cherryMesh.material.emissiveIntensity=0;}
   const start=mountainTrailNodes[0]; state.x=start.x; state.y=start.y; state.z=start.z; state.vx=state.vy=state.vz=0; state.yaw=Math.PI;
   state.friendsMet=0;
@@ -2630,19 +2859,37 @@ function enterMountainWorld(now) {
   for(const item of decorBubbles)item.group.visible=false;
   for(const friend of friends) {
     friend.met=false; friend.bobble.group.visible=false;
-    const segment=mountainTrailSegments[Math.min(mountainTrailSegments.length-1,Math.floor(friends.indexOf(friend)*mountainTrailSegments.length/friends.length))];
-    const pt=mountainPointOnSegment(segment,0.35+(friends.indexOf(friend)%3)*0.14,(friends.indexOf(friend)%2?4.0:-4.0));
-    friend.x=pt.x; friend.z=pt.z; friend.worldFloorY=pt.y;
-    friend.slug.position.set(pt.x,pt.y,pt.z); friend.slug.rotation.y=Math.atan2(state.x-pt.x,state.z-pt.z);
-    friend.nameSprite.position.set(pt.x,pt.y+4.05,pt.z); friend.bobble.y=pt.y+3.5; friend.bobble.group.position.set(pt.x+1.4,friend.bobble.y,pt.z);
+    const friendIndex=friends.indexOf(friend);
+    // Prefer one unique trail section per friend. Search several points/sides and explicitly
+    // reject every solid ridge/outcrop footprint so no interaction target can spawn embedded.
+    const preferredSegmentIndex=Math.min(mountainTrailSegments.length-1,friendIndex);
+    let pt=null, surface=null;
+    const segmentOrder=mountainTrailSegments.map((_,i)=>i).sort((a,b)=>Math.abs(a-preferredSegmentIndex)-Math.abs(b-preferredSegmentIndex));
+    outer: for(const segmentIndex of segmentOrder) {
+      const segment=mountainTrailSegments[segmentIndex];
+      const tValues=segmentIndex===preferredSegmentIndex?[0.34,0.5,0.66]:[0.28,0.5,0.72];
+      const sideValues=friendIndex%2===0?[-3.1,3.1,0]:[3.1,-3.1,0];
+      for(const t of tValues) for(const side of sideValues) {
+        const candidate=mountainPointOnSegment(segment,t,side);
+        const candidateSurface=findMountainSurfaceAt(candidate.x,candidate.z);
+        if(candidateSurface && isMountainSpawnClear(candidate.x,candidate.z)) {
+          pt=candidate; surface=candidateSurface; break outer;
+        }
+      }
+    }
+    if(!pt) { pt={x:0,z:76,y:0.16}; surface={y:0.16}; }
+    const x=pt.x,z=pt.z,y=surface.y;
+    friend.x=x; friend.z=z; friend.worldFloorY=y;
+    friend.slug.position.set(x,y,z); friend.slug.rotation.y=Math.atan2(state.x-x,state.z-z);
+    friend.nameSprite.position.set(x,y+4.05,z); friend.bobble.y=y+3.5; friend.bobble.group.position.set(x+1.4,friend.bobble.y,z);
   }
   $('#pearls-stat-label')?.replaceChildren(document.createTextNode('FRESH MINTS'));
   const eyebrow=document.querySelector('.brand-copy .eyebrow'); if(eyebrow) eyebrow.textContent='BLUE RIDGE MOUNTAIN';
   const hint=document.querySelector('.world-hint span:last-child'); if(hint) hint.textContent='Blue Ridge Mountain · hike the switchbacks, hop the ledges, watch the gusts';
   const mapTitle=document.querySelector('.map-heading b'); if(mapTitle) mapTitle.textContent='BLUE RIDGE MAP';
   $('#finale-kicker').textContent='WELCOME TO BLUE RIDGE'; $('#finale-title').textContent='Blue Ridge Mountain';
-  $('#finale-subtitle').textContent='Collect 35 Fresh Mints to reach the summit. There are 42 on the mountain, so you can leave a few behind. Strong gusts can tumble you back toward the base.';
-  $('#stage-goal').textContent='FRESH MINTS · Collect 35 of 42 to reach the summit';
+  const mountainGoal = refreshStageGoal('mountain');
+  $('#finale-subtitle').textContent=`Collect ${mountainGoal.required} Fresh Mints to reach the summit. There are ${mountainGoal.available} on the mountain, so you can leave some behind. Strong gusts can tumble you back toward the base.`;
   scene.fog=new THREE.Fog('#9eb9c8',105,285); hemi.color.set('#dcebf1'); hemi.groundColor.set('#354d5e'); fillLight.color.set('#bed9e9'); shadow.material.color.set('#243949'); shadow.material.opacity=0.32;
   setWeather('wind',now); applyLocalTime(); updateHUD(); drawMinimap(); updateWeatherReadout(); setStageMusic('mountain');
   sfx(392,0.3,'sine',0.12); setTimeout(()=>sfx(523,0.32,'triangle',0.1),145); setTimeout(()=>sfx(659,0.42,'sine',0.12),300);
@@ -2681,11 +2928,11 @@ function setReplayCollectibleVisibility(stage) {
     mint.group.visible = key === stage;
   }
   state.pearls = 0; state.waterMintsCollected = 0; state.bridgeMintsCollected = 0; state.mountainMintsCollected = 0;
-  const required = stage === 'meadow' ? MEADOW_MINT_REQUIREMENT : (stage === 'water' ? WATER_MINT_REQUIREMENT : (stage === 'bridge' ? BRIDGE_MINT_REQUIREMENT : MOUNTAIN_MINT_REQUIREMENT));
+  const required = mintRequirementFor(stage);
   const available = entries.find(([key]) => key === stage)[1].length;
-  const label = stage === 'meadow' ? 'FIZZ MINTS' : (stage === 'water' ? 'SEA MINTS' : (stage === 'bridge' ? 'BRIDGE MINTS' : 'FRESH MINTS'));
+  const label = stageMintLabel(stage);
   $('#pearls-stat-label')?.replaceChildren(document.createTextNode(label));
-  $('#stage-goal').textContent = `${label} · Collect ${required} of ${available} to progress`;
+  refreshStageGoal(stage);
   $('#finale-subtitle').textContent = `Replay mode has ${available} mints available. Collect ${required} to clear this world; your collected count starts at zero.`;
 }
 function launchReplayStage(stage) {
@@ -2693,7 +2940,7 @@ function launchReplayStage(stage) {
   closeDialogue(); clearHeld();
   state.started = true; state.paused = false; state.finale.active = false; state.stageAwaitingTap = false;
   state.friendsMet = 0; state.score = 0; state.elapsed = 0; state.mintGiftClaimed = false;
-  state.activeFriend = null; state.activeDialogueLines = null; state.waterJumpsUsed = 0;
+  state.activeFriend = null; state.activeDialogueLines = null; state.waterJumpsUsed = 0; state.ridingTurtle = false;
   state.vx = state.vy = state.vz = 0; state.knockbackUntil = 0; state.highJumpUntil = 0; state.highJumpWasActive = false;
   $('#stage-select-overlay').classList.add('is-hidden'); $('#finale-overlay').classList.remove('is-visible', 'waiting-for-stage-tap'); $('#pause-screen').classList.add('is-hidden');
   touchControls.classList.remove('finale-lock', 'is-disabled'); $('#pause-toggle').disabled = false; $('#pause-toggle').textContent = 'Ⅱ';
@@ -2797,7 +3044,8 @@ function updateFizzFinale(now) {
       for (const button of document.querySelectorAll('[data-replay-stage]')) {
         const key = button.dataset.replayStage;
         const count = listMap[key];
-        button.querySelector('small').textContent = `${count} mints available · counter resets`;
+        const requiredAgain = { meadow:MEADOW_MINT_REQUIREMENT*2, water:WATER_MINT_REQUIREMENT*2, bridge:BRIDGE_MINT_REQUIREMENT*2, mountain:MOUNTAIN_MINT_REQUIREMENT*2 }[key];
+        button.querySelector('small').textContent = `${count} mints available · collect ${requiredAgain} · counter resets`;
       }
     }
     clearHeld(); refreshPrompt(); drawMinimap();
@@ -2806,10 +3054,10 @@ function updateFizzFinale(now) {
 function collectPearl(pearl) {
   if (pearl.collected || state.finale.active) return;
   pearl.collected = true; pearl.group.visible = false; state.pearls++; state.score += 25;
-  sparkle(new THREE.Vector3(pearl.x, pearl.y, pearl.z), state.pearls >= MEADOW_MINT_REQUIREMENT ? 36 : 10);
+  sparkle(new THREE.Vector3(pearl.x, pearl.y, pearl.z), state.pearls >= mintRequirementFor('meadow') ? 36 : 10);
   sfx(960, 0.1, 'sine', 0.12); setTimeout(() => sfx(1240, 0.12, 'sine', 0.09), 45);
   updateHUD();
-  if (state.pearls >= MEADOW_MINT_REQUIREMENT) startFizzFinale();
+  if (state.pearls >= mintRequirementFor('meadow')) startFizzFinale();
   else toast('A little fizz pearl!');
 }
 
@@ -2819,7 +3067,7 @@ function collectWaterMint(mint) {
   sparkle(new THREE.Vector3(mint.x, mint.baseY + 0.2, mint.z), 15);
   sfx(1120, 0.12, 'sine', 0.12); setTimeout(() => sfx(1460, 0.15, 'triangle', 0.095), 55);
   updateHUD(); drawMinimap();
-  if (state.waterMintsCollected >= WATER_MINT_REQUIREMENT) {
+  if (state.waterMintsCollected >= mintRequirementFor('water')) {
     toast('Seafoam set complete! The ivy bridges are waking up…');
     startStageFinale('bridge');
   } else toast('Seafoam mint! Cool and ocean-fresh.');
@@ -2830,7 +3078,7 @@ function collectBridgeMint(mint) {
   sparkle(new THREE.Vector3(mint.x, mint.surfaceY + 1.1, mint.z), 17);
   sfx(1010, 0.11, 'sine', 0.12); setTimeout(() => sfx(1390, 0.13, 'triangle', 0.1), 50);
   updateHUD(); drawMinimap();
-  if (state.bridgeMintsCollected >= BRIDGE_MINT_REQUIREMENT) {
+  if (state.bridgeMintsCollected >= mintRequirementFor('bridge')) {
     toast('Bridge garden complete! The Blue Ridge is next…');
     startStageFinale('mountain');
   } else toast('Bridge mint! One step closer to the canopy.');
@@ -2841,7 +3089,7 @@ function collectMountainMint(mint) {
   sparkle(new THREE.Vector3(mint.x, mint.surfaceY + 1.05, mint.z), 18);
   sfx(1180,0.12,'sine',0.13); setTimeout(()=>sfx(1560,0.15,'triangle',0.1),55);
   updateHUD(); drawMinimap();
-  if(state.mountainMintsCollected >= MOUNTAIN_MINT_REQUIREMENT) {
+  if(state.mountainMintsCollected >= mintRequirementFor('mountain')) {
     toast('All fresh mountain mints found! Summit celebration!'); startStageFinale('complete');
   } else toast('Fresh mint! Cool as the ridge wind.');
 }
@@ -3085,15 +3333,28 @@ function bridgeSupportBelow(x, z, y) {
   return support;
 }
 function playerSupportBelow(x, z, y) {
+  if (worldMode === 'water') { const turtleTop = seaTurtleSurfaceAt(x,z); return turtleTop !== null && y <= turtleTop + 0.24 ? turtleTop : 0; }
   if (worldMode === 'bridge') return bridgeSupportBelow(x, z, y);
   if (worldMode === 'mountain') return Math.max(mountainSupportBelow(x, z, y), trampolineSupportBelow(x, z, y));
   if (worldMode === 'meadow') return trampolineSupportBelow(x, z, y);
   return 0;
 }
 function updatePlayer(dt, now) {
+  if (worldMode === 'water' && state.ridingTurtle) {
+    state.x = seaTurtle.group.position.x;
+    state.z = seaTurtle.group.position.z + seaTurtle.riderOffsetZ;
+    state.y = seaTurtleSurfaceAt(state.x,state.z) ?? seaTurtle.topY;
+    state.vx = seaTurtle.vx; state.vz = seaTurtle.vz; state.vy = 0;
+    state.yaw = seaTurtle.heading;
+    state.elapsed += dt;
+    player.position.set(state.x,state.y+Math.sin(state.elapsed*8)*0.025,state.z); player.rotation.y=state.yaw; player.rotation.x=player.rotation.z=0;
+    shadow.position.set(state.x,state.y*0.02+0.025,state.z); shadow.scale.set(0.72,1.14,1);
+    camera.position.set(state.x+7.8,state.y+6.2,state.z+12.4); camera.up.set(0,1,0); camera.lookAt(state.x,state.y+2.5,state.z-1.4);
+    return;
+  }
   const ix = (held.right ? 1 : 0) - (held.left ? 1 : 0);
   const iz = (held.back ? 1 : 0) - (held.forward ? 1 : 0);
-  const oldX = state.x, oldZ = state.z, oldY = state.y;
+  const oldX = state.x, oldZ = state.z, oldY = state.y, oldVy = state.vy;
   const planarLen = Math.hypot(ix, iz) || 1;
   const speed = 8.8;
   const windStrength = weatherEffectStrength(now);
@@ -3142,10 +3403,19 @@ function updatePlayer(dt, now) {
   if (state.y >= ceiling) { state.y = ceiling; if (state.vy > 0) state.vy = 0; }
   state.x = THREE.MathUtils.clamp(state.x + state.vx * dt, -103, 103);
   state.z = THREE.MathUtils.clamp(state.z + state.vz * dt, -103, 103);
+  if (worldMode === 'mountain') resolveMountainTrailMovement(oldX, oldY, oldZ, oldVy);
+  if (worldMode === 'water' && !state.ridingTurtle && state.vy <= 0) {
+    const turtleTop = seaTurtleSurfaceAt(state.x,state.z);
+    if (turtleTop !== null && oldY >= turtleTop - 0.18 && state.y <= turtleTop + 0.12) {
+      state.y=turtleTop; state.vy=0; state.waterJumpsUsed=0; state.ridingTurtle=true;
+      toast('Turtle taxi! It will guide you toward sea mints.'); sfx(390,0.13,'sine',0.1); setTimeout(()=>sfx(590,0.15,'triangle',0.1),70);
+    }
+  }
   constrainToBridgeRails();
   resolveObstacleCollisions(oldX, oldZ, now);
   resolveMovablePropCollisions(oldX, oldZ);
   resolveFriendCollisions();
+  resolveSeaTurtleBodyCollision();
   resolveWaterShellCollision();
   if (Math.abs(state.x) >= 102.9) state.vx = 0;
   if (Math.abs(state.z) >= 102.9) state.vz = 0;
@@ -3237,6 +3507,7 @@ function update(dt, now) {
   if (now >= nextMinimapDraw) { drawMinimap(); nextMinimapDraw = now + 140; }
   updateObstacleMotion(dt, now);
   updateTrampolineVisuals(now);
+  updateSeaTurtle(dt, now);
   if(worldMode==='mountain' && weather.kind==='wind' && weatherEffectStrength(now)>0.01) {
     mountainGustGroup.visible=state.started && !state.paused;
     for(const gust of mountainGustStreaks){const t=now*0.0014+gust.phase; gust.mesh.position.set(state.x+Math.sin(t)*gust.span+weather.windX*2.4,state.y+gust.height+Math.sin(t*1.7)*0.35,state.z+Math.cos(t*0.83)*gust.span+weather.windZ*2.4); gust.mesh.rotation.y=Math.atan2(weather.windX,weather.windZ);}
