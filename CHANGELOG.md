@@ -1,5 +1,21 @@
 # Changelog
 
+## October 17, 2026 — Restore previous renderer/shadows and fix turtle-goal finale
+- Reverted the most recent experimental environment batching, GPU-driven far-bubble animation, and movement-triggered shadow refresh changes. This build is based on the previous revision's renderer and shadow behaviour, before the latest performance pass that made shadows look wrong.
+- Moved the Water World turtle beside the player spawn at (7.1, 0, 12), rather than beneath the player's starting position. The player must approach it and hop onto the shell.
+- When the Seafoam Mint goal is reached while riding the turtle, detach cleanly and play a short hop off the shell followed by a brief walk onto clear seabed before the camera zoom and mint dance begin.
+- Added build guards for the turtle's offset spawn and the exit-hop/walk sequence so neither behaviour silently regresses.
+
+
+## October 17, 2026 — Structural mobile rendering optimization (experimental; reverted in the latest package)
+- Merged static meadow flower petals/stems/centres into spatial vertex-colour chunks without replacing their underlying shapes or material detail.
+- Merged static Bridge World plank/rail meshes and tree trunks/canopies by material, and merged underwater kelp/coral into four spatial chunks while preserving their material textures and sway shader.
+- Converted water surface ripples, sea-current foam and ring effects to instancing; jump bubbles and sand puffs use fixed pools instead of allocating/removing meshes during gameplay. Mushrooms use instanced parts while retaining their push/wobble proxies.
+- Moved far-bubble drift, rise and current motion to a GPU vertex shader: all 4,000 bubbles remain animated/poppable, while touch devices keep 300 close bubbles as detailed spheres and draw the other 3,700 as points. CPU contact/ranking runs at 15 Hz, detailed bubble matrices at 30 Hz and LOD sort at 4 Hz.
+- Preserved the 1024px touch / 1536px desktop shadow-map resolution and the detailed playable character, but restrict casting to the character and refresh the shadow map only after meaningful player movement/turning.
+- Added optional `?perf=1` diagnostics reporting FPS, frame time, draw calls, triangles, geometry/texture counts, active pixel ratio and batching savings each second.
+- Kept a touch pixel-ratio cap of 1.0 with adaptation down to 0.62 under sustained load, and retained distance-based fog culling of environmental detail.
+
 ## October 17, 2026 — Blue Ridge continuity, collision, and doubled mint progression
 - Reconciled the canonical source and production copy so `src/main.js`, `src/style.css`, and `dist/` are generated from the same version.
 - Rebuilt Blue Ridge switchback junctions as height-matched surface patches, and blended overlapping ramp support heights to eliminate abrupt seam changes across the walkable width.

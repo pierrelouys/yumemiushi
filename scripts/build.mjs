@@ -117,6 +117,11 @@ const gameplayGuards = [
   /x: 1\.7, z: 13\.8, y: 25\.85, length: 28, width: 5\.0, rotation: 0\.0/,
   /state\.stageAwaitingTap/,
   /player\.rotation\.y = state\.yaw/,
+  /const exitTurtle = worldMode === 'water' && targetWorld === 'bridge' && state\.ridingTurtle/,
+  /state\.finale\.exitDuration = exitTurtle \? 1\.35 : 0/,
+  /const hopDuration = 0\.55/,
+  /progress = 0\.88 \* smooth\(hopT\)/,
+  /state\.x = f\.exitTarget\.x; state\.y = 0; state\.z = f\.exitTarget\.z/,
 ];
 for (const guard of gameplayGuards) {
   if (!guard.test(gameSource)) throw new Error(`Missing gameplay feature regression guard: ${guard}`);
@@ -247,13 +252,26 @@ if (!/width: clamp\(150px, 40vh, 174px\); height: clamp\(150px, 40vh, 174px\)/.t
 }
 if (!/desiredX=dx\/dist\*24\.0/.test(gameSource) ||
     !/if\(seaTurtle\.target\?\.collected\) seaTurtle\.target=null/.test(gameSource) ||
-    !/seaTurtle\.group\.position\.set\(0,0,9\.5\)/.test(gameSource) ||
+    !/seaTurtle\.group\.position\.set\(7\.1,0,12\)/.test(gameSource) ||
+    !/const exitTurtle = worldMode === 'water' && targetWorld === 'bridge' && state\.ridingTurtle/.test(gameSource) ||
+    !/state\.finale\.exitDuration = exitTurtle \? 1\.35 : 0/.test(gameSource) ||
+    !/const exitDuration = f\.exitTurtle \? f\.exitDuration : 0/.test(gameSource) ||
+    !/const hopDuration = 0\.55/.test(gameSource) ||
+    !/state\.ridingTurtle = false/.test(gameSource) ||
     !/const shellPattern = new THREE\.CanvasTexture\(shellCanvas\)/.test(gameSource) ||
     !/if\(state\.ridingTurtle && !state\.finale\.active\)/.test(gameSource)) {
   throw new Error('Water turtle must spawn near the player, follow a locked target quickly, collect mint by shell contact, and use a textured shell.');
 }
 if (!/const seaMintSpots = \[\.\.\.baseSeaMintSpots, \.\.\.baseSeaMintSpots\.map/.test(gameSource) || !/parallel sweep makes the path vague and exploratory/.test(gameSource)) {
   throw new Error('Water mint layout must remain a sparse, vague diagonal route.');
+}
+const turtleStartMatch = gameSource.match(/const group = new THREE\.Group\(\); group\.position\.set\(([-\d.]+), 0, ([-\d.]+)\); waterWorld\.add\(group\);/);
+if (!turtleStartMatch) throw new Error('Water World turtle must have an explicit spawn point.');
+const turtleStartX = Number(turtleStartMatch[1]), turtleStartZ = Number(turtleStartMatch[2]);
+const turtlePlayerSpawnDistance = Math.hypot(turtleStartX, turtleStartZ - 12);
+if (turtlePlayerSpawnDistance < 6.0) throw new Error(`Turtle spawn overlaps the player spawn (${turtlePlayerSpawnDistance.toFixed(2)} units apart).`);
+if (!/const exitDirections = \[/.test(gameSource) || !/exitTarget = \{[\s\S]*?turtleX \+ exitDirection\[0\] \* 7\.1/.test(gameSource) || !/walkY = THREE\.MathUtils\.lerp\(f\.exitStart\.y, 0, hopT\) \+ Math\.sin\(hopT \* Math\.PI\) \* 1\.75/.test(gameSource)) {
+  throw new Error('Mint-goal dance while riding the turtle must first hop off, walk clear of the shell, and then start the celebration.');
 }
 
 for (const relative of [

@@ -1,5 +1,7 @@
 # クリームソーダうみうし — Fizzy Meadow
 
+**Latest correction:** This build restores the renderer and shadow behaviour from before the last experimental performance revision. In Water World, the turtle begins beside (not underneath) the player spawn. If the player reaches the mint goal while riding, the character hops off the shell, walks a short distance onto clear seabed, and only then performs the zoom-in celebration dance.
+
 A mobile-friendly, free-roaming 3D plush adventure built for static hosting on GitHub Pages. Explore the meadow, swim through Water World, hop between stacked bridges, and hike the fictional Blue Ridge Mountain. Friends have conversations, harmless creatures wander through each biome, and there are extra mints so you do not need to find every collectible.
 
 ## Current standard progression
@@ -63,6 +65,13 @@ You can use your own music. Place your MP3 files in `public/assets/` with these 
 - `stage04.mp3` — Blue Ridge Mountain
 
 The files are optional and are intentionally not included in this ZIP. Each stage attempts to load its corresponding MP3. If a file is missing, fails to load, or does not begin providing media data before the timeout, the existing synthesized music is used as fallback. After adding tracks, rebuild before deployment.
+
+## Rendering and mobile performance
+
+This package intentionally restores the renderer and shadow-update behaviour from the revision before the latest experimental performance pass. The close-up plush character, previous shadow refresh cadence, and world content are retained; the environment batching and GPU-driven far-bubble shader from that experimental pass are not used here. The existing modest bubble LOD, distance culling, and adaptive pixel ratio from the prior baseline remain.
+
+The current baseline keeps 4,000 bubbles in Water World. On touch devices, the nearest 300 render as detailed spheres and the rest as point sprites; bubble motion and contact are updated on the CPU at a throttled cadence. The shadow map refreshes regularly again rather than staying stale until the camera/player moves enough to trigger it.
+
 
 ## Build locally
 

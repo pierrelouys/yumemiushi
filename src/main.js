@@ -1458,7 +1458,8 @@ if (waterMints.length !== WATER_MINT_TOTAL || waterMints.length < WATER_MINT_REQ
 // A friendly giant sea turtle can be boarded by landing on its broad shell.
 // While aboard, it slowly steers toward the nearest uncollected Seafoam Mint.
 const seaTurtle = (() => {
-  const group = new THREE.Group(); group.position.set(0, 0, 9.5); waterWorld.add(group);
+  // Park the turtle beside the spawn, not underneath it. The player must approach and hop aboard.
+  const group = new THREE.Group(); group.position.set(7.1, 0, 12); waterWorld.add(group);
   const skin = new THREE.MeshStandardMaterial({ color:'#4b9b83', roughness:0.86, bumpMap:meadowGrassBump, bumpScale:0.045 });
   const flipperMat = new THREE.MeshStandardMaterial({ color:'#62b69a', roughness:0.9, bumpMap:ivoryBump, bumpScale:0.035 });
   const shellCanvas = document.createElement('canvas'); shellCanvas.width = 512; shellCanvas.height = 512;
@@ -2833,13 +2834,54 @@ $('#dialogue-close').addEventListener('click', closeDialogue);
 
 function startStageFinale(targetWorld = 'water') {
   if (state.finale.active || (worldMode === 'meadow' && targetWorld !== 'water') || (worldMode === 'water' && targetWorld !== 'bridge') || (worldMode === 'bridge' && targetWorld !== 'mountain') || (worldMode === 'mountain' && targetWorld !== 'complete')) return;
-  state.finale.active = true; state.finale.targetWorld = targetWorld; state.finale.startAt = performance.now(); state.finale.baseYaw = state.yaw;
+
+  // If the goal mint is picked up while riding, give the slug a clear, readable exit before the
+  // celebration: hop off the shell, land beside it, and take a few steps away before the close-up dance.
+  const exitTurtle = worldMode === 'water' && targetWorld === 'bridge' && state.ridingTurtle;
+  const exitStart = exitTurtle ? {
+    x: seaTurtle.group.position.x,
+    y: seaTurtleSurfaceAt(seaTurtle.group.position.x, seaTurtle.group.position.z) ?? state.y,
+    z: seaTurtle.group.position.z + seaTurtle.riderOffsetZ,
+  } : null;
+  let exitTarget = null, exitWalkYaw = state.yaw;
+  if (exitTurtle) {
+    // The turtle advances immediately before mint pickup; sync to its current frame before detaching.
+    state.x = exitStart.x; state.y = exitStart.y; state.z = exitStart.z;
+    const h = seaTurtle.heading;
+    const sideX = Math.cos(h), sideZ = -Math.sin(h);
+    const forwardX = Math.sin(h), forwardZ = Math.cos(h);
+    // Prefer stepping off the side the turtle is facing, but choose another clear edge near world bounds.
+    const exitDirections = [
+      [sideX, sideZ], [-sideX, -sideZ], [forwardX, forwardZ], [-forwardX, -forwardZ],
+      [sideX + forwardX, sideZ + forwardZ], [sideX - forwardX, sideZ - forwardZ],
+      [-sideX + forwardX, -sideZ + forwardZ], [-sideX - forwardX, -sideZ - forwardZ],
+    ].map(([dx, dz]) => { const length = Math.hypot(dx, dz) || 1; return [dx / length, dz / length]; });
+    const turtleX = seaTurtle.group.position.x, turtleZ = seaTurtle.group.position.z;
+    const exitDirection = exitDirections
+      .filter(([dx, dz]) => Math.abs(turtleX + dx * 7.1 + forwardX * 0.25) <= 91.5 && Math.abs(turtleZ + dz * 7.1 + forwardZ * 0.25) <= 91.5)
+      .sort((a, b) => (b[0] * sideX + b[1] * sideZ) - (a[0] * sideX + a[1] * sideZ))[0] || [-Math.sign(turtleX || 1), -Math.sign(turtleZ || 1)];
+    exitTarget = {
+      x: THREE.MathUtils.clamp(turtleX + exitDirection[0] * 7.1 + forwardX * 0.25, -91.5, 91.5),
+      z: THREE.MathUtils.clamp(turtleZ + exitDirection[1] * 7.1 + forwardZ * 0.25, -91.5, 91.5),
+    };
+    exitWalkYaw = Math.atan2(exitTarget.x - exitStart.x, exitTarget.z - exitStart.z);
+    state.ridingTurtle = false;
+    seaTurtle.target = null;
+  }
+
+  state.finale.active = true; state.finale.targetWorld = targetWorld; state.finale.startAt = performance.now();
+  state.finale.baseYaw = exitTurtle ? exitWalkYaw : state.yaw;
   state.stageAwaitingTap = false; $('#stage-continue-button').classList.add('is-hidden'); $('#finale-overlay').classList.remove('waiting-for-stage-tap');
   state.finale.camOffset.set(camera.position.x - state.x, camera.position.y - state.y, camera.position.z - state.z);
   state.finale.danceY = (targetWorld === 'complete' || targetWorld === 'mountain') ? state.y : 0;
   state.finale.cameraYaw = Math.atan2(2.65, 6.9);
   state.finale.fovStart = camera.fov; state.finale.enteredWater = false; state.finale.overlayShown = false;
-  state.vx = state.vy = state.vz = 0; state.y = state.finale.danceY; state.paused = false;
+  state.finale.exitTurtle = exitTurtle; state.finale.exitStart = exitStart; state.finale.exitTarget = exitTarget;
+  state.finale.exitDuration = exitTurtle ? 1.35 : 0; state.finale.exitWalkYaw = exitWalkYaw; state.finale.exitCompleted = false;
+  state.vx = state.vy = state.vz = 0;
+  if (!exitTurtle) state.y = state.finale.danceY;
+  state.paused = false;
+  if (exitTurtle) { spawnWaterJumpBubbles(); sfx(620, 0.13, 'sine', 0.085); }
   clearHeld(); $('#talk-prompt').classList.add('is-hidden'); $('#toast').classList.remove('show');
   touchControls.classList.add('finale-lock'); $('#pause-toggle').disabled = true;
   $('#finale-kicker').textContent = worldMode === 'meadow' ? 'FIZZY GOAL REACHED' : (targetWorld === 'bridge' ? 'SEAFOAM SET COMPLETE' : (targetWorld === 'mountain' ? 'BRIDGE GARDEN COMPLETE' : 'SUMMIT REACHED'));
@@ -2858,7 +2900,8 @@ function enterWaterWorld(now) {
   state.stageAwaitingTap = true; state.paused = true;
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Dive into the Water World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
   state.x=0; state.y=0; state.z=12; state.vx=state.vy=state.vz=0; state.yaw=Math.PI;
-  seaTurtle.group.position.set(0,0,9.5); seaTurtle.vx=seaTurtle.vz=0; seaTurtle.target=null; seaTurtle.heading=0;
+  // Close to the spawn, but offset sideways so the player must approach and hop onto the shell.
+  seaTurtle.group.position.set(7.1,0,12); seaTurtle.vx=seaTurtle.vz=0; seaTurtle.target=null; seaTurtle.heading=0;
   state.friendsMet = 0; state.waterJumpsUsed = 0; state.ridingTurtle = false; state.trampolineReadyUntil = 0; state.trampolineLaunchUntil = 0;
   for (const friend of friends) friend.met = false;
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
@@ -3104,8 +3147,45 @@ for (const button of document.querySelectorAll('[data-replay-stage]')) {
 }
 
 function updateFizzFinale(now) {
-  const f = state.finale, elapsed = (now - f.startAt) / 1000;
+  const f = state.finale, rawElapsed = (now - f.startAt) / 1000;
   const smooth = (v) => { v = THREE.MathUtils.clamp(v, 0, 1); return v * v * (3 - 2 * v); };
+
+  // A boarded-turtle finish gets its own short exit beat before the standard mint dance starts.
+  // The hop clears the shell, then the character walks the final step to a clear patch of seabed.
+  const exitDuration = f.exitTurtle ? f.exitDuration : 0;
+  if (f.exitTurtle && rawElapsed < exitDuration) {
+    const hopDuration = 0.55;
+    let progress, walkY;
+    if (rawElapsed < hopDuration) {
+      const hopT = THREE.MathUtils.clamp(rawElapsed / hopDuration, 0, 1);
+      progress = 0.88 * smooth(hopT);
+      walkY = THREE.MathUtils.lerp(f.exitStart.y, 0, hopT) + Math.sin(hopT * Math.PI) * 1.75;
+    } else {
+      const walkT = THREE.MathUtils.clamp((rawElapsed - hopDuration) / (exitDuration - hopDuration), 0, 1);
+      progress = 0.88 + 0.12 * smooth(walkT);
+      walkY = 0;
+    }
+    state.x = THREE.MathUtils.lerp(f.exitStart.x, f.exitTarget.x, progress);
+    state.z = THREE.MathUtils.lerp(f.exitStart.z, f.exitTarget.z, progress);
+    state.y = Math.max(0, walkY);
+    state.yaw = f.exitWalkYaw;
+    player.position.set(state.x, state.y, state.z);
+    player.rotation.set(0, f.exitWalkYaw, 0);
+    player.scale.setScalar(1);
+    for (const feeler of player.userData.feelers) {
+      const wobble = Math.sin(rawElapsed * 17 + feeler.side) * 0.11;
+      feeler.mesh.rotation.z = feeler.baseRotZ + wobble;
+      feeler.tip.rotation.z = feeler.baseRotZ + wobble;
+    }
+    camera.position.set(state.x + f.camOffset.x, state.y + f.camOffset.y, state.z + f.camOffset.z);
+    camera.up.set(0, 1, 0); camera.lookAt(state.x, state.y + 1.32, state.z - 0.2);
+    return;
+  }
+  if (f.exitTurtle && !f.exitCompleted) {
+    state.x = f.exitTarget.x; state.y = 0; state.z = f.exitTarget.z; state.yaw = f.exitWalkYaw;
+    f.exitCompleted = true;
+  }
+  const elapsed = Math.max(0, rawElapsed - exitDuration);
   const zoom = smooth(elapsed / 2.45);
   const closeOffset = new THREE.Vector3(2.65, 2.75, 6.9);
   let camOffset = f.camOffset.clone().lerp(closeOffset, zoom);
