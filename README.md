@@ -4,11 +4,11 @@ A mobile-friendly, free-roaming 3D plush adventure built for static hosting on G
 
 ## Current standard progression
 
-The current standard run uses twice the original mint requirements and twice the original available pools. The 20% cushion remains, so each stage has more collectibles than its completion goal.
+The current standard run uses twice the original mint requirements and twice the original available pools. The 20% cushion remains for the regular collectible pools, plus 44 bonus Fizz along the four trampoline jump arcs. Completion goals remain unchanged for the standard run.
 
 | Stage | Available | Required to progress |
 |---|---:|---:|
-| 1 — Fizzy Meadow | 60 Fizz Mints | 50 |
+| 1 — Fizzy Meadow | 104 Fizz Mints (including 44 airborne trampoline-trail mints) | 50 |
 | 2 — Water World | 60 Seafoam Mints | 50 |
 | 3 — Bridge World | 72 Bridge Mints | 60 |
 | 4 — Blue Ridge Mountain | 84 Fresh Mints | 70 |
@@ -17,7 +17,7 @@ Unused mints are removed when the next stage loads. Blue Ridge is a fictional bl
 
 ## Water World
 
-Water World includes 4,000 animated, poppable bubbles, double and triple jumps (press Jump again while airborne), bubble bursts beneath extra jumps, a rideable giant turtle that seeks the nearest uncollected Seafoam Mint while carrying the player, a shell with collision, fish and crabs, and visible currents with world-spanning foam and underwater sand puffs.
+Water World includes 4,000 animated, poppable bubbles (300 closest to the player render as detailed spheres on touch devices and 760 on desktop; distant bubbles use low-cost point LOD), double and triple jumps (press Jump again while airborne), bubble bursts beneath extra jumps, a rideable giant turtle that seeks the nearest uncollected Seafoam Mint while carrying the player, a shell with collision, fish and crabs, and visible currents with world-spanning foam and underwater sand puffs.
 
 ## After clearing stage four
 
@@ -25,7 +25,7 @@ The ending promises more worlds to come and offers a selector for replaying any 
 
 | Stage | Replay mints available | Replay goal |
 |---|---:|---:|
-| Fizzy Meadow | 120 | 100 |
+| Fizzy Meadow | 208 | 100 |
 | Water World | 120 | 100 |
 | Bridge World | 144 | 120 |
 | Blue Ridge Mountain | 168 | 140 |
@@ -77,7 +77,7 @@ npm run build
 
 The development server prints `http://localhost:5173`. The static site is built into `dist/`.
 
-The build has regression checks for the standard and replay mint counts, underwater bubble count and turtle/triple-jump systems, the final Bridge World jump, Blue Ridge ridge collision, supported safe friend placement, and continuous mountain ramps across five lanes and all eight segments. It checks that ramp height changes stay below 0.15 world units per sampled step; the current maximum is 0.141.
+The build has regression checks for the standard and replay mint counts, underwater bubble count and turtle/triple-jump systems, adaptive render scale and LOD culling, the final Bridge World jump, Blue Ridge ridge collision, supported safe friend placement, and continuous mountain ramps across five lanes and all eight segments. It checks that ramp height changes stay below 0.15 world units per sampled step; the current maximum is 0.141.
 
 ## Deploy to GitHub Pages
 

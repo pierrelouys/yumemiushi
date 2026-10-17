@@ -6,6 +6,13 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // Movement is player-driven on X/Z; Y follows gravity and the shared jump action.
 const $ = (selector) => document.querySelector(selector);
 const canvas = $('#game-canvas');
+const touchGpuProfile = matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches;
+const renderPixelRatioCap = touchGpuProfile ? 1.28 : 1.6;
+const shadowRefreshInterval = touchGpuProfile ? 72 : 34;
+let activePixelRatio = Math.min(window.devicePixelRatio || 1, renderPixelRatioCap);
+const minimumAdaptivePixelRatio = Math.min(0.90, activePixelRatio);
+let averageFrameMs = 16.7;
+let lastAdaptiveResolutionChange = 0;
 const scene = new THREE.Scene();
 let worldMode = 'meadow';
 const MEADOW_MINT_REQUIREMENT = 50;
@@ -14,22 +21,25 @@ const BRIDGE_MINT_REQUIREMENT = 60;
 const MOUNTAIN_MINT_REQUIREMENT = 70;
 const MINT_CUSHION = 1.2;
 const MEADOW_MINT_TOTAL = Math.ceil(MEADOW_MINT_REQUIREMENT * MINT_CUSHION);
+const MEADOW_TRAMPOLINE_MINTS_PER_PAD = 11;
+const MEADOW_TRAMPOLINE_MINT_COUNT = 4 * MEADOW_TRAMPOLINE_MINTS_PER_PAD;
+const MEADOW_AVAILABLE_MINT_TOTAL = MEADOW_MINT_TOTAL + MEADOW_TRAMPOLINE_MINT_COUNT;
 const WATER_MINT_TOTAL = Math.ceil(WATER_MINT_REQUIREMENT * MINT_CUSHION);
 const BRIDGE_MINT_TOTAL = Math.ceil(BRIDGE_MINT_REQUIREMENT * MINT_CUSHION);
 const MOUNTAIN_MINT_TOTAL = Math.ceil(MOUNTAIN_MINT_REQUIREMENT * MINT_CUSHION);
 scene.background = new THREE.Color('#d5f8f1');
-scene.fog = new THREE.Fog('#d5f8f1', 105, 245);
+scene.fog = new THREE.Fog('#d5f8f1', 82, 178);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+renderer.setPixelRatio(activePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.13;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-// Keep full-resolution, soft shadows but refresh the shadow map at 40 Hz.
-// The slight temporal cadence saves substantial GPU work on phones without softening the image.
+// Keep detailed, soft shadows. Refresh at about 14 Hz on touch devices and 29 Hz on desktop;
+// the retained shadow-map resolution keeps edges soft while avoiding a full shadow render per frame.
 renderer.shadowMap.autoUpdate = false;
 renderer.shadowMap.needsUpdate = true;
 let lastShadowRefresh = 0;
@@ -40,7 +50,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff5e8', 3.0);
 sun.position.set(-35, 65, 32);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1536, 1536);
+sun.shadow.mapSize.set(touchGpuProfile ? 1024 : 1536, touchGpuProfile ? 1024 : 1536);
 sun.shadow.camera.left = -90;
 sun.shadow.camera.right = 90;
 sun.shadow.camera.top = 90;
@@ -635,6 +645,8 @@ scene.add(safetyGround);
 // The ground remains continuous behind it, so the edge is visible without any pit or fall.
 const landDecorationObjects = [];
 const landBoundaryObjects = [];
+const landLodDecorations = [];
+let lastLandDetailCull = 0;
 const movableProps = [];
 const barkMat = new THREE.MeshStandardMaterial({ map: barkTexture, bumpMap: barkBumpTexture, bumpScale: 0.13, roughness: 1, color: '#fff7ee' });
 const barkLightMat = new THREE.MeshStandardMaterial({ map: barkTexture, bumpMap: barkBumpTexture, bumpScale: 0.10, roughness: 1, color: '#d7b28a' });
@@ -646,7 +658,7 @@ function addBoundaryLog(x, z, length, alongX) {
   cylinder.rotation.z = alongX ? Math.PI / 2 : 0;
   if (!alongX) cylinder.rotation.x = Math.PI / 2;
   cylinder.position.set(x, radius + 0.08, z);
-  cylinder.castShadow = false; cylinder.receiveShadow = true; scene.add(cylinder); landBoundaryObjects.push(cylinder);
+  cylinder.castShadow = false; cylinder.receiveShadow = false; scene.add(cylinder); landBoundaryObjects.push(cylinder); landLodDecorations.push(cylinder);
 }
 const GRASS_BLADE_CAPACITY = 2200;
 const grassBladeGeo = new THREE.ConeGeometry(0.105, 0.5, 5);
@@ -949,7 +961,7 @@ function addFlower(x, z, scale = 1, petalColor = '#fff7ee') {
   const centerMat = new THREE.MeshStandardMaterial({ color: '#ffe1a0', roughness: 0.9 });
   for (let j = 0; j < 6; j++) { const a = j * Math.PI / 3; const p = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 9), petalMat); p.position.set(Math.cos(a) * 0.25, 0.61 + Math.sin(a) * 0.03, Math.sin(a) * 0.25); p.scale.set(1, 0.75, 0.85); group.add(p); }
   const center = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), centerMat); center.position.y = 0.62; group.add(center);
-  group.position.set(x, 0, z); group.scale.setScalar(scale); group.traverse(o => { if (o.isMesh) o.castShadow = false; }); scene.add(group); landDecorationObjects.push(group); windSwayObjects.push(group);
+  group.position.set(x, 0, z); group.scale.setScalar(scale); group.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } }); scene.add(group); landDecorationObjects.push(group); landLodDecorations.push(group); windSwayObjects.push(group);
 }
 function addSodaMushroom(x, z, scale, capColor) {
   const group = new THREE.Group();
@@ -957,7 +969,7 @@ function addSodaMushroom(x, z, scale, capColor) {
   const cap = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshStandardMaterial({ color: capColor, roughness: 0.8, bumpMap: mintBump, bumpScale: 0.05 })); cap.position.y = 1.65; cap.scale.set(1.22, 0.67, 1.18); cap.castShadow = true; group.add(cap);
   const dotMat = new THREE.MeshStandardMaterial({ color: '#fff8ed', roughness: 0.78 });
   for (let i = 0; i < 5; i++) { const a = i * Math.PI * 0.4; const dot = new THREE.Mesh(new THREE.SphereGeometry(0.095, 10, 8), dotMat); dot.position.set(Math.cos(a) * 0.67, 2.05 + (i % 2) * 0.12, Math.sin(a) * 0.65); group.add(dot); }
-  group.position.set(x, 0, z); group.scale.setScalar(scale); scene.add(group); landDecorationObjects.push(group); windSwayObjects.push(group);
+  group.position.set(x, 0, z); group.scale.setScalar(scale); group.traverse(o => { if (o.isMesh) o.castShadow = false; }); scene.add(group); landDecorationObjects.push(group); landLodDecorations.push(group); windSwayObjects.push(group);
   movableProps.push({ type: 'mushroom', group, baseX: x, baseZ: z, offsetX: 0, offsetZ: 0, vx: 0, vz: 0, radius: 0.94 * scale, scale, homeY: 0 });
 }
 function addPushableRock(x, z, scale = 1, tint = '#b5b4a4') {
@@ -968,7 +980,7 @@ function addPushableRock(x, z, scale = 1, tint = '#b5b4a4') {
   const side = new THREE.Mesh(stoneGeometry, rockMaterial);
   side.position.set(0.42 * scale, 0.24 * scale, -0.35 * scale); side.scale.set(0.56 * scale, 0.48 * scale, 0.62 * scale); side.castShadow = true; side.receiveShadow = true; group.add(side);
   group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  group.position.set(x, 0, z); group.scale.setScalar(1); scene.add(group); landDecorationObjects.push(group);
+  group.position.set(x, 0, z); group.scale.setScalar(1); scene.add(group); landDecorationObjects.push(group); landLodDecorations.push(group);
   movableProps.push({ type: 'rock', group, baseX: x, baseZ: z, offsetX: 0, offsetZ: 0, vx: 0, vz: 0, radius: 0.86 * scale, scale, mass: 1.8 + scale * 0.9, tint });
 }
 function addBubbleCluster(x, y, z, scale = 1) {
@@ -1175,6 +1187,7 @@ for (let i = 0; i < 48; i++) {
 }
 // Little pastel coral branches punctuate the kelp with a few warm pops of colour.
 const coralMaterials = ['#e98da8', '#e9b77d', '#a99be8', '#f1c4d1', '#78cfc6'].map(color => new THREE.MeshStandardMaterial({ color, roughness: 0.75, side: THREE.DoubleSide }));
+const underwaterCoral = [];
 for (let i = 0; i < 22; i++) {
   let x = (waterRand() * 2 - 1) * 94, z = (waterRand() * 2 - 1) * 94;
   if (Math.hypot(x, z - 12) < 13) x += x < 0 ? -16 : 16;
@@ -1187,22 +1200,60 @@ for (let i = 0; i < 22; i++) {
     coral.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 7, 0.065 + waterRand() * 0.035, 5, false), mat));
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 9, 7), mat); tip.position.set(side + bend, h, bend * 0.18); coral.add(tip);
   }
-  waterWorld.add(coral);
+  waterWorld.add(coral); underwaterCoral.push(coral);
 }
-// A large, world-wide population of touchable bubbles uses one instanced draw call for mobile performance.
-const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.48, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
-const underwaterBubbleGeometry = new THREE.SphereGeometry(1, 10, 8);
+const underwaterDetailGroups = [...underwaterKelp.map(item => item.group), ...underwaterCoral];
+let lastUnderwaterDetailCull = 0;
+let lastUnderwaterKelpAnimation = 0;
+function updateUnderwaterDetailLOD(now) {
+  if (worldMode !== 'water' || now - lastUnderwaterDetailCull < 220) return;
+  lastUnderwaterDetailCull = now;
+  const detailRange = touchGpuProfile ? 80 : 106;
+  const rangeSq = detailRange * detailRange;
+  for (const group of underwaterDetailGroups) {
+    const dx = group.position.x - state.x, dz = group.position.z - state.z;
+    group.visible = dx * dx + dz * dz <= rangeSq;
+  }
+}
+function updateMeadowDetailLOD(now) {
+  if (worldMode !== 'meadow' || now - lastLandDetailCull < 220) return;
+  lastLandDetailCull = now;
+  const detailRange = touchGpuProfile ? 102 : 138;
+  const rangeSq = detailRange * detailRange;
+  for (const object of landLodDecorations) {
+    const dx = object.position.x - state.x, dz = object.position.z - state.z;
+    object.visible = dx * dx + dz * dz <= rangeSq;
+  }
+}
+// Dense bubble world: nearby bubbles get shaded sphere LOD; distant bubbles become tiny points.
+// This preserves a field of 4,000 individually poppable bubbles without rasterising 4,000 glassy spheres.
 const UNDERWATER_BUBBLE_COUNT = 4000;
-const underwaterBubbleMesh = new THREE.InstancedMesh(underwaterBubbleGeometry, underwaterBubbleMaterial, UNDERWATER_BUBBLE_COUNT);
+const UNDERWATER_DETAILED_BUBBLES = touchGpuProfile ? 300 : 760;
+const underwaterBubbleMaterial = new THREE.MeshPhysicalMaterial({ color: '#d2fbff', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.48, clearcoat: 1, clearcoatRoughness: 0.04, depthWrite: false });
+const underwaterBubbleGeometry = new THREE.SphereGeometry(1, 8, 6);
+const underwaterBubbleMesh = new THREE.InstancedMesh(underwaterBubbleGeometry, underwaterBubbleMaterial, UNDERWATER_DETAILED_BUBBLES);
+underwaterBubbleMesh.count = UNDERWATER_DETAILED_BUBBLES;
 underwaterBubbleMesh.frustumCulled = false; underwaterBubbleMesh.visible = false; waterWorld.add(underwaterBubbleMesh);
+const farBubbleGeometry = new THREE.BufferGeometry();
+const farBubblePositions = new Float32Array((UNDERWATER_BUBBLE_COUNT - UNDERWATER_DETAILED_BUBBLES) * 3);
+farBubbleGeometry.setAttribute('position', new THREE.BufferAttribute(farBubblePositions, 3));
+const farBubblePoints = new THREE.Points(farBubbleGeometry, new THREE.PointsMaterial({ color: '#d9fcff', size: 0.68, sizeAttenuation: true, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending }));
+farBubblePoints.frustumCulled = false; farBubblePoints.visible = false; waterWorld.add(farBubblePoints);
 const underwaterBubbles = [];
 const underwaterBubbleDummy = new THREE.Object3D();
+const underwaterBubbleCount = UNDERWATER_BUBBLE_COUNT;
+const bubbleLodOrder = Uint16Array.from({length: UNDERWATER_BUBBLE_COUNT}, (_, i) => i);
+const bubbleLodDistances = new Float32Array(UNDERWATER_BUBBLE_COUNT);
+let lastUnderwaterBubbleFieldUpdate = 0;
+let lastBubbleLodSort = 0;
+const BUBBLE_LOD_SORT_INTERVAL = 240;
 for (let i = 0; i < UNDERWATER_BUBBLE_COUNT; i++) {
   const x = (waterRand() * 2 - 1) * 98, z = (waterRand() * 2 - 1) * 98;
   const baseY = i < 190 ? 0.12 + waterRand() * 4.5 : 3 + waterRand() * 24;
   underwaterBubbles.push({ baseX: x, baseZ: z, baseY, size: 0.085 + waterRand() * 0.20, riseSpeed: 0.00020 + waterRand() * 0.00034, drift: 0.28 + waterRand() * 1.1, phase: waterRand() * Math.PI * 2, poppedUntil: 0, currentX: x, currentY: baseY, currentZ: z });
 }
-underwaterBubbleMesh.count = underwaterBubbles.length;
+underwaterBubbleMesh.count = UNDERWATER_DETAILED_BUBBLES;
+farBubbleGeometry.computeBoundingSphere();
 const waterJumpBubbles = [];
 const waterJumpBubbleGeometry = new THREE.SphereGeometry(0.13, 10, 8);
 const waterJumpBubbleBaseMaterial = new THREE.MeshPhysicalMaterial({ color: '#e6ffff', roughness: 0.06, transparent: true, opacity: 0.68, clearcoat: 1, depthWrite: false });
@@ -1229,39 +1280,57 @@ function updateWaterJumpBubbles(dt) {
 }
 function updateUnderwaterBubbleField(now) {
   underwaterBubbleMesh.visible = worldMode === 'water';
+  farBubblePoints.visible = worldMode === 'water';
   if (worldMode !== 'water') return;
+  // Update bubble positions and contact at 25 Hz, and sort LOD ranks only 4 times per second.
+  // The character/camera still run at full frame rate; far bubbles stay cheap point sprites.
+  if (now - lastUnderwaterBubbleFieldUpdate < 40) return;
+  lastUnderwaterBubbleFieldUpdate = now;
   const surge = seaCurrent.active ? 5.5 : 1.0;
   const popDistanceSq = 1.06 * 1.06;
   const playerY = state.y + 1.15;
   for (let i = 0; i < underwaterBubbles.length; i++) {
     const bubble = underwaterBubbles[i];
-    let x = bubble.baseX + Math.sin(now * 0.00062 + bubble.phase) * bubble.drift * surge + (seaCurrent.active ? seaCurrent.x * Math.sin(now * 0.001 + bubble.phase) * 0.85 : 0);
-    let y = 0.25 + (((bubble.baseY + now * bubble.riseSpeed * surge) % 30 + 30) % 30);
-    let z = bubble.baseZ + Math.cos(now * 0.00047 + bubble.phase) * bubble.drift * 0.52 + (seaCurrent.active ? seaCurrent.z * Math.cos(now * 0.0011 + bubble.phase) * 0.65 : 0);
-    if (now < bubble.poppedUntil) {
-      underwaterBubbleDummy.position.set(x, -300, z); underwaterBubbleDummy.scale.setScalar(0.001);
-    } else {
+    const x = bubble.baseX + Math.sin(now * 0.00062 + bubble.phase) * bubble.drift * surge + (seaCurrent.active ? seaCurrent.x * Math.sin(now * 0.001 + bubble.phase) * 0.85 : 0);
+    const y = 0.25 + (((bubble.baseY + now * bubble.riseSpeed * surge) % 30 + 30) % 30);
+    const z = bubble.baseZ + Math.cos(now * 0.00047 + bubble.phase) * bubble.drift * 0.52 + (seaCurrent.active ? seaCurrent.z * Math.cos(now * 0.0011 + bubble.phase) * 0.65 : 0);
+    let hidden = now < bubble.poppedUntil;
+    if (!hidden) {
       bubble.currentX = x; bubble.currentY = y; bubble.currentZ = z;
       const dx = x - state.x, dy = y - playerY, dz = z - state.z;
       if (state.started && !state.paused && !state.finale.active && Math.abs(dx) < 1.9 && Math.abs(dz) < 1.9 && Math.abs(dy) < 1.45 && dx*dx + dy*dy + dz*dz < popDistanceSq + bubble.size * bubble.size) {
-        bubble.poppedUntil = now + 420;
+        bubble.poppedUntil = now + 420; hidden = true;
         bubble.baseX = THREE.MathUtils.clamp(state.x + (rand() - 0.5) * 36, -98, 98);
         bubble.baseZ = THREE.MathUtils.clamp(state.z + (rand() - 0.5) * 36, -98, 98);
         bubble.baseY = 0.5 + rand() * 20;
-        // A crisp, fizzy pop; effects route through the SFX bus, not the music track.
         sfx(880 + rand() * 260, 0.065, 'sine', 0.09);
         sfx(410 + rand() * 120, 0.045, 'triangle', 0.035);
         sparkle(new THREE.Vector3(x, y, z), 3);
-        underwaterBubbleDummy.position.set(x, -300, z); underwaterBubbleDummy.scale.setScalar(0.001);
-      } else {
-        const pulse = 0.93 + Math.sin(now * 0.0018 + bubble.phase) * 0.07 + (seaCurrent.active ? 0.12 : 0);
-        underwaterBubbleDummy.position.set(x, y, z); underwaterBubbleDummy.scale.setScalar(bubble.size * pulse);
       }
     }
-    underwaterBubbleDummy.rotation.set(Math.sin(now * 0.0007 + bubble.phase) * 0.05, bubble.phase, Math.cos(now * 0.0006 + bubble.phase) * 0.05);
-    underwaterBubbleDummy.updateMatrix(); underwaterBubbleMesh.setMatrixAt(i, underwaterBubbleDummy.matrix);
+    bubble.renderX = x; bubble.renderY = y; bubble.renderZ = z; bubble.renderHidden = hidden;
+    // Distance-based LOD: choose detailed bubbles nearest the player, and keep the rest as fast points.
+    const dx = x - state.x, dy = y - playerY, dz = z - state.z;
+    bubbleLodDistances[i] = dx*dx + dy*dy + dz*dz;
+  }
+  if (now - lastBubbleLodSort >= BUBBLE_LOD_SORT_INTERVAL) {
+    bubbleLodOrder.sort((a,b)=>bubbleLodDistances[a]-bubbleLodDistances[b]);
+    lastBubbleLodSort = now;
+  }
+  for (let slot=0; slot<UNDERWATER_DETAILED_BUBBLES; slot++) {
+    const bubble=underwaterBubbles[bubbleLodOrder[slot]];
+    underwaterBubbleDummy.position.set(bubble.renderX, bubble.renderHidden ? -300 : bubble.renderY, bubble.renderZ);
+    underwaterBubbleDummy.scale.setScalar(bubble.renderHidden ? 0.001 : bubble.size*(0.93+Math.sin(now*0.0018+bubble.phase)*0.07+(seaCurrent.active?0.12:0)));
+    underwaterBubbleDummy.rotation.set(Math.sin(now*0.0007+bubble.phase)*0.05,bubble.phase,Math.cos(now*0.0006+bubble.phase)*0.05);
+    underwaterBubbleDummy.updateMatrix(); underwaterBubbleMesh.setMatrixAt(slot,underwaterBubbleDummy.matrix);
+  }
+  let point=0;
+  for (let slot=UNDERWATER_DETAILED_BUBBLES; slot<underwaterBubbleCount; slot++) {
+    const bubble=underwaterBubbles[bubbleLodOrder[slot]], p=point*3; point++;
+    farBubblePositions[p]=bubble.renderX; farBubblePositions[p+1]=bubble.renderHidden?-300:bubble.renderY; farBubblePositions[p+2]=bubble.renderZ;
   }
   underwaterBubbleMesh.instanceMatrix.needsUpdate = true;
+  farBubbleGeometry.attributes.position.needsUpdate = true;
 }
 const seaCurrent = { active: false, nextAt: performance.now() + 18000, until: 0, x: 0.72, z: -0.42, strength: 2.5, nextBubbleSound: 0 };
 // Directional white foam makes ocean currents readable before they push the player.
@@ -1350,16 +1419,14 @@ const seaMintEdgeMat = new THREE.MeshStandardMaterial({ color: '#b7fbf8', roughn
 const seaMintSpiralMat = new THREE.MeshBasicMaterial({ color: '#f4ffed', toneMapped: false });
 const seaMintGlowMat = new THREE.MeshBasicMaterial({ color: '#a4fff5', transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
 const baseSeaMintSpots = [
-  [-76,-65],[-51,-74],[-24,-78],[13,-77],[48,-69],[77,-54],
-  [-84,-25],[-56,-22],[-32,-41],[29,-35],[58,-26],[82,-12],
-  [-78,12],[-48,29],[-17,42],[15,22],[45,39],[73,32],
-  [-65,66],[-28,73],[18,67],[57,72],[-4,-5],[3,52],[35,-57],
-  [-94,48],[93,47],[-91,-51],[88,67],[67,-91],
+  [-92,-78],[-78,-69],[-65,-66],[-51,-55],[-39,-49],[-25,-40],[-12,-34],[1,-27],[14,-20],[29,-14],
+  [42,-7],[55,0],[68,8],[82,15],[92,22],[-83,-48],[-68,-37],[-55,-31],[-41,-22],[-28,-15],
+  [-13,-5],[2,2],[17,10],[33,18],[47,26],[62,33],[78,43],[88,53],[-51,4],[20,65],
 ];
-// A second offset/rotated sweep fills the wide ocean without simply piling mint pairs together.
+// A second, offset parallel sweep makes the path vague and exploratory rather than tightly packed.
 const seaMintSpots = [...baseSeaMintSpots, ...baseSeaMintSpots.map(([x,z], i) => [
-  THREE.MathUtils.clamp(-z * 0.92 + ((i % 3) - 1) * 4.5, -96, 96),
-  THREE.MathUtils.clamp(x * 0.92 + ((i % 4) - 1.5) * 3.5, -96, 96),
+  THREE.MathUtils.clamp(x - 7 + ((i % 4) - 1.5) * 2.0, -96, 96),
+  THREE.MathUtils.clamp(z + 10 + ((i % 5) - 2) * 2.4, -96, 96),
 ])];
 if (seaMintSpots.length !== WATER_MINT_TOTAL) throw new Error(`Water World should contain ${WATER_MINT_TOTAL} sea mints (20% cushion); found ${seaMintSpots.length}`);
 for (let i = 0; i < seaMintSpots.length; i++) {
@@ -1391,10 +1458,25 @@ if (waterMints.length !== WATER_MINT_TOTAL || waterMints.length < WATER_MINT_REQ
 // A friendly giant sea turtle can be boarded by landing on its broad shell.
 // While aboard, it slowly steers toward the nearest uncollected Seafoam Mint.
 const seaTurtle = (() => {
-  const group = new THREE.Group(); group.position.set(0, 0, 4); waterWorld.add(group);
+  const group = new THREE.Group(); group.position.set(0, 0, 9.5); waterWorld.add(group);
   const skin = new THREE.MeshStandardMaterial({ color:'#4b9b83', roughness:0.86, bumpMap:meadowGrassBump, bumpScale:0.045 });
   const flipperMat = new THREE.MeshStandardMaterial({ color:'#62b69a', roughness:0.9, bumpMap:ivoryBump, bumpScale:0.035 });
-  const shellMat = new THREE.MeshStandardMaterial({ color:'#40795a', roughness:0.8, bumpMap:stoneBumpTexture, bumpScale:0.11, metalness:0.025 });
+  const shellCanvas = document.createElement('canvas'); shellCanvas.width = 512; shellCanvas.height = 512;
+  const shellCtx = shellCanvas.getContext('2d');
+  const shellGrad = shellCtx.createRadialGradient(190,165,15,260,265,360);
+  shellGrad.addColorStop(0,'#83a965'); shellGrad.addColorStop(0.55,'#4c8158'); shellGrad.addColorStop(1,'#244d3e');
+  shellCtx.fillStyle=shellGrad; shellCtx.fillRect(0,0,512,512);
+  for(let row=-1;row<7;row++) for(let col=-1;col<7;col++) {
+    const x=col*86+(row%2)*43, y=row*74, radius=45;
+    shellCtx.beginPath(); for(let k=0;k<6;k++){const a=Math.PI/3*k+Math.PI/6; const px=x+Math.cos(a)*radius,py=y+Math.sin(a)*radius*0.82; if(k===0)shellCtx.moveTo(px,py);else shellCtx.lineTo(px,py);} shellCtx.closePath();
+    const tint=(row*7+col*11+80)%19;
+    shellCtx.fillStyle=`rgba(${tint>9?160:15},${tint>9?188:48},${tint>9?105:40},0.20)`; shellCtx.fill();
+    shellCtx.strokeStyle='rgba(210,218,148,0.56)'; shellCtx.lineWidth=3; shellCtx.stroke();
+    shellCtx.strokeStyle='rgba(20,55,43,0.34)'; shellCtx.lineWidth=1.4; shellCtx.stroke();
+    shellCtx.beginPath();shellCtx.ellipse(x-5,y-6,24,14,-0.35,0,Math.PI*1.65);shellCtx.strokeStyle='rgba(230,230,171,0.25)';shellCtx.lineWidth=2;shellCtx.stroke();
+  }
+  const shellPattern = new THREE.CanvasTexture(shellCanvas); shellPattern.colorSpace=THREE.SRGBColorSpace; shellPattern.wrapS=THREE.RepeatWrapping; shellPattern.wrapT=THREE.RepeatWrapping; shellPattern.repeat.set(1.5,1.2); shellPattern.anisotropy=4;
+  const shellMat = new THREE.MeshStandardMaterial({ color:'#ffffff', map:shellPattern, roughness:0.74, bumpMap:stoneBumpTexture, bumpScale:0.11, metalness:0.025 });
   const shellRimMat = new THREE.MeshStandardMaterial({ color:'#b3ca83', roughness:0.88 });
   const bellyMat = new THREE.MeshStandardMaterial({ color:'#c6d9a2', roughness:0.95 });
   const body = new THREE.Mesh(new THREE.SphereGeometry(1,22,14),skin); body.position.set(0,0.63,0); body.scale.set(2.8,0.68,3.45); body.castShadow=true; group.add(body);
@@ -1443,27 +1525,37 @@ function updateSeaTurtle(dt,now) {
     // follows the nearest remaining Seafoam Mint, then heads for another if the player collects it.
     if(state.ridingTurtle) {
       let target=seaTurtle.target;
-      if(!target || target.collected || !target.group.visible || Math.hypot(target.x-seaTurtle.group.position.x,target.z-seaTurtle.group.position.z)<4.0) {
+      // Lock the target until its mint is collected. Retargeting on a distance threshold caused
+      // equal-distance targets to alternate and made the turtle backtrack forever.
+      if(!target || target.collected || !target.group.visible) {
         let bestDist=Infinity; target=null;
         for(const mint of waterMints) if(!mint.collected && mint.group.visible) {
           const dist=Math.hypot(mint.x-seaTurtle.group.position.x,mint.z-seaTurtle.group.position.z);
-          if(dist>3.5 && dist<bestDist){bestDist=dist;target=mint;}
+          if(dist<bestDist){bestDist=dist;target=mint;}
         }
         seaTurtle.target=target;
       }
       if(target) {
         const dx=target.x-seaTurtle.group.position.x,dz=target.z-seaTurtle.group.position.z,dist=Math.hypot(dx,dz)||1;
-        if(dist>2.4){desiredX=dx/dist*2.75;desiredZ=dz/dist*2.75;seaTurtle.heading=Math.atan2(dx,dz);}
-        else {desiredX=Math.sin(now*0.0005)*0.35;desiredZ=Math.cos(now*0.00055)*0.35;}
+        if(dist<=4.25) {
+          collectWaterMint(target);
+          seaTurtle.target=null;
+        } else {
+          desiredX=dx/dist*24.0; desiredZ=dz/dist*24.0; seaTurtle.heading=Math.atan2(dx,dz);
+        }
       }
     } else {
       seaTurtle.target=null;
     }
-    const smoothing=1-Math.exp(-dt*(state.ridingTurtle?1.8:2.8));
+    const smoothing=1-Math.exp(-dt*(state.ridingTurtle?8.5:2.8));
     seaTurtle.vx+=(desiredX-seaTurtle.vx)*smoothing; seaTurtle.vz+=(desiredZ-seaTurtle.vz)*smoothing;
     seaTurtle.group.position.x=THREE.MathUtils.clamp(seaTurtle.group.position.x+seaTurtle.vx*dt,-92,92);
     seaTurtle.group.position.z=THREE.MathUtils.clamp(seaTurtle.group.position.z+seaTurtle.vz*dt,-92,92);
     seaTurtle.group.position.y=0.035+Math.sin(now*0.0021+seaTurtle.phase)*0.065;
+    if(state.ridingTurtle && !state.finale.active) {
+      for(const mint of waterMints) if(!mint.collected && mint.group.visible && Math.hypot(mint.x-seaTurtle.group.position.x,mint.z-seaTurtle.group.position.z)<4.25) collectWaterMint(mint);
+      if(seaTurtle.target?.collected) seaTurtle.target=null;
+    }
   }
   seaTurtle.group.rotation.y=seaTurtle.heading;
   for(const [i,flipper] of seaTurtle.flippers.entries()) {
@@ -2124,7 +2216,7 @@ function addMeadowTrampoline(x, z, accent = '#f8c7d4') {
     spring.position.set(Math.cos(angle) * 3.0, 0.19, Math.sin(angle) * 3.0);
     spring.rotation.z = Math.cos(angle) * 0.15; spring.rotation.x = Math.sin(angle) * 0.15; group.add(spring);
   }
-  group.position.set(x, 0, z); scene.add(group); landDecorationObjects.push(group);
+  group.position.set(x, 0, z); scene.add(group); landDecorationObjects.push(group); landLodDecorations.push(group);
   const pad = { group, x, z, radius: 3.0, topY: 0.48, top, rim, topBaseY: top.position.y, rimBaseY: rim.position.y, lastBounceAt: -10000, lastSoundAt: -10000, phase: rand() * Math.PI * 2 };
   trampolines.push(pad); return pad;
 }
@@ -2132,6 +2224,26 @@ addMeadowTrampoline(-53, -22, '#f4aebd');
 addMeadowTrampoline(43, -39, '#b6a8f0');
 addMeadowTrampoline(-45, 59, '#f4c875');
 addMeadowTrampoline(61, 47, '#f2a8c9');
+// Bonus mints trace the actual ballistic arc of a huge trampoline jump. Each trail is aimed
+// inward from its pad so it is reachable, and progression still only requires 50 Fizz Mints.
+const trampolineTrailPearls = [];
+for (const [padIndex, pad] of trampolines.entries()) {
+  let dx=-pad.x, dz=-pad.z; const length=Math.hypot(dx,dz)||1; dx/=length; dz/=length;
+  for (let n=0; n<MEADOW_TRAMPOLINE_MINTS_PER_PAD; n++) {
+    const t=0.30+n*0.25;
+    const distance=8.8*t;
+    const x=THREE.MathUtils.clamp(pad.x+dx*distance,-96,96);
+    const z=THREE.MathUtils.clamp(pad.z+dz*distance,-96,96);
+    const y=Math.max(2.3,pad.topY+29.5*t-9.6*t*t);
+    const group=new THREE.Group();
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(0.32,16,12),pearlMaterial[(padIndex+n)%pearlMaterial.length]); orb.scale.set(1,1.12,0.9); group.add(orb);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(0.46,0.038,7,24),new THREE.MeshStandardMaterial({color:'#fffaf0',roughness:0.35,emissive:'#fff0cb',emissiveIntensity:0.24})); ring.rotation.x=0.2; group.add(ring);
+    group.position.set(x,y,z); scene.add(group);
+    const pearl={group,x,z,y,phase:rand()*Math.PI*2,collected:false,trampolineTrail:true};
+    pearls.push(pearl); trampolineTrailPearls.push(pearl);
+  }
+}
+if(trampolineTrailPearls.length!==MEADOW_TRAMPOLINE_MINT_COUNT || pearls.length!==MEADOW_AVAILABLE_MINT_TOTAL) throw new Error(`Meadow trampoline trails must add ${MEADOW_TRAMPOLINE_MINT_COUNT} bonus Fizz Mints; found ${trampolineTrailPearls.length}.`);
 const mountainTrampolines = [];
 function addMountainTrampoline(x, z, accent = '#9ddfff') {
   const group = new THREE.Group();
@@ -2730,9 +2842,9 @@ function startStageFinale(targetWorld = 'water') {
   state.vx = state.vy = state.vz = 0; state.y = state.finale.danceY; state.paused = false;
   clearHeld(); $('#talk-prompt').classList.add('is-hidden'); $('#toast').classList.remove('show');
   touchControls.classList.add('finale-lock'); $('#pause-toggle').disabled = true;
-  $('#finale-kicker').textContent = worldMode === 'meadow' ? 'EVERY LAST DROP' : (targetWorld === 'bridge' ? 'SEAFOAM SET COMPLETE' : (targetWorld === 'mountain' ? 'BRIDGE GARDEN COMPLETE' : 'SUMMIT REACHED'));
-  $('#finale-title').textContent = worldMode === 'meadow' ? 'You found every fizz!' : (targetWorld === 'bridge' ? 'A bridge to a new world!' : (targetWorld === 'mountain' ? 'The Blue Ridge awaits!' : 'A fresh mint summit!'));
-  $('#finale-subtitle').textContent = worldMode === 'meadow' ? 'A little celebration… then, something is bubbling beneath the meadow.' : (targetWorld === 'bridge' ? 'The ivy-covered bridges are waiting above the treetops.' : (targetWorld === 'mountain' ? 'The high trails lead toward a blue mountain ridge.' : 'You climbed the Blue Ridge and found its freshest mints.'));
+  $('#finale-kicker').textContent = worldMode === 'meadow' ? 'FIZZY GOAL REACHED' : (targetWorld === 'bridge' ? 'SEAFOAM SET COMPLETE' : (targetWorld === 'mountain' ? 'BRIDGE GARDEN COMPLETE' : 'SUMMIT REACHED'));
+  $('#finale-title').textContent = worldMode === 'meadow' ? 'So many fizzy finds!' : (targetWorld === 'bridge' ? 'A bridge to a new world!' : (targetWorld === 'mountain' ? 'The Blue Ridge awaits!' : 'A fresh mint summit!'));
+  $('#finale-subtitle').textContent = worldMode === 'meadow' ? `You gathered ${state.pearls} Fizz Mints! Your trampoline trail still sparkles behind you. Time to see what is bubbling beneath the meadow.` : (targetWorld === 'bridge' ? 'The ivy-covered bridges are waiting above the treetops.' : (targetWorld === 'mountain' ? 'The high trails lead toward a blue mountain ridge.' : 'You climbed the Blue Ridge and found its freshest mints.'));
   sfx(784, 0.16, 'triangle', 0.15); setTimeout(() => sfx(988, 0.18, 'triangle', 0.14), 105);
   setTimeout(() => sfx(1175, 0.20, 'sine', 0.14), 220); setTimeout(() => sfx(1568, 0.36, 'sine', 0.16), 345);
 }
@@ -2745,6 +2857,8 @@ function enterWaterWorld(now) {
   for (const pearl of pearls) { pearl.collected = true; pearl.group.visible = false; }
   state.stageAwaitingTap = true; state.paused = true;
   const arrivalButton = $('#stage-continue-button'); arrivalButton.innerHTML = 'Dive into the Water World <span>→</span>'; arrivalButton.classList.add('is-hidden'); $('#finale-overlay').classList.add('waiting-for-stage-tap');
+  state.x=0; state.y=0; state.z=12; state.vx=state.vy=state.vz=0; state.yaw=Math.PI;
+  seaTurtle.group.position.set(0,0,9.5); seaTurtle.vx=seaTurtle.vz=0; seaTurtle.target=null; seaTurtle.heading=0;
   state.friendsMet = 0; state.waterJumpsUsed = 0; state.ridingTurtle = false; state.trampolineReadyUntil = 0; state.trampolineLaunchUntil = 0;
   for (const friend of friends) friend.met = false;
   // Swap every land-specific layer for the new seabed while preserving the player, pals, and exploration controls.
@@ -2755,7 +2869,7 @@ function enterWaterWorld(now) {
   $('#pearls-stat-label')?.replaceChildren(document.createTextNode('SEA MINTS'));
   const brandEyebrow = document.querySelector('.brand-copy .eyebrow'); if (brandEyebrow) brandEyebrow.textContent = 'WATER WORLD';
   updateHUD(); drawMinimap();
-  scene.fog = new THREE.FogExp2('#0b5269', 0.0065);
+  scene.fog = new THREE.FogExp2('#0b5269', 0.0085);
   hemi.color.set('#a7e8f4'); hemi.groundColor.set('#0b3e51'); hemi.intensity = 1.05;
   fillLight.color.set('#64e5ef'); fillLight.intensity = 0.5;
   shadow.material.color.set('#073b50'); shadow.material.opacity = 0.38;
@@ -3063,6 +3177,7 @@ function collectPearl(pearl) {
 
 function collectWaterMint(mint) {
   if (mint.collected || worldMode !== 'water' || state.finale.active) return;
+  if (seaTurtle.target === mint) seaTurtle.target = null;
   mint.collected = true; mint.group.visible = false; state.waterMintsCollected++; state.score += 40;
   sparkle(new THREE.Vector3(mint.x, mint.baseY + 0.2, mint.z), 15);
   sfx(1120, 0.12, 'sine', 0.12); setTimeout(() => sfx(1460, 0.15, 'triangle', 0.095), 55);
@@ -3443,6 +3558,9 @@ function updateAmbientCreatures(dt, now) {
   for (const critter of ambientCreatureRecords) {
     // Inactive biome creatures are hidden and need no transform/gait work on mobile.
     if (!critter.group.visible || !critter.group.parent?.visible) continue;
+    const playerDx = critter.group.position.x - state.x, playerDz = critter.group.position.z - state.z;
+    const updateRange = touchGpuProfile ? 78 : 112;
+    if (playerDx * playerDx + playerDz * playerDz > updateRange * updateRange) continue;
     const t = now * 0.001 + critter.phase;
     const dxHome = critter.homeX - critter.group.position.x;
     const dzHome = critter.homeZ - critter.group.position.z;
@@ -3504,6 +3622,8 @@ function update(dt, now) {
   if (now >= nextLocalTimeCheck) { applyLocalTime(); nextLocalTimeCheck = now + (60 - new Date().getSeconds()) * 1000; }
   updateWeather(dt, now);
   updateDynamicSky(dt, now);
+  updateUnderwaterDetailLOD(now);
+  updateMeadowDetailLOD(now);
   if (now >= nextMinimapDraw) { drawMinimap(); nextMinimapDraw = now + 140; }
   updateObstacleMotion(dt, now);
   updateTrampolineVisuals(now);
@@ -3595,9 +3715,12 @@ function update(dt, now) {
         ring.scale.setScalar(0.7 + pulse * 1.0); ring.material.opacity = 0.58 * (1 - pulse);
       });
     }
-    for (const kelp of underwaterKelp) kelp.group.rotation.z = Math.sin(now * 0.0008 + kelp.phase) * 0.045;
+    if (now - lastUnderwaterKelpAnimation >= 40) {
+      lastUnderwaterKelpAnimation = now;
+      for (const kelp of underwaterKelp) if (kelp.group.visible) kelp.group.rotation.z = Math.sin(now * 0.0008 + kelp.phase) * 0.045;
+      underwaterSnow.rotation.y += 0.008;
+    }
     updateUnderwaterBubbleField(now);
-    underwaterSnow.rotation.y += dt * 0.008;
   }
   for (let particleIndex = particles.length - 1; particleIndex >= 0; particleIndex--) {
     const p = particles[particleIndex];
@@ -3710,13 +3833,25 @@ window.addEventListener('blur', clearHeld);
 document.addEventListener('visibilitychange', () => { if (document.hidden) clearHeld(); });
 
 function frame(now) {
-  const dt = Math.min((now - (frame.last || now)) / 1000, 0.04); frame.last = now;
+  const rawFrameMs = frame.last ? now - frame.last : 16.7;
+  averageFrameMs += (rawFrameMs - averageFrameMs) * 0.08;
+  const dt = Math.min(rawFrameMs / 1000, 0.04); frame.last = now;
   if (document.hidden) { frame.last = now; requestAnimationFrame(frame); return; }
-  if (now - lastShadowRefresh >= 25) { renderer.shadowMap.needsUpdate = true; lastShadowRefresh = now; }
+  if (touchGpuProfile && now - lastAdaptiveResolutionChange > 1250) {
+    const nativeCap = Math.min(window.devicePixelRatio || 1, renderPixelRatioCap);
+    let nextRatio = activePixelRatio;
+    if (averageFrameMs > 24 && activePixelRatio > minimumAdaptivePixelRatio) nextRatio = Math.max(minimumAdaptivePixelRatio, activePixelRatio - 0.08);
+    else if (averageFrameMs < 18 && activePixelRatio < nativeCap) nextRatio = Math.min(nativeCap, activePixelRatio + 0.035);
+    if (Math.abs(nextRatio - activePixelRatio) > 0.005) {
+      activePixelRatio = nextRatio; renderer.setPixelRatio(activePixelRatio); renderer.setSize(window.innerWidth, window.innerHeight, false);
+      lastAdaptiveResolutionChange = now;
+    }
+  }
+  if (now - lastShadowRefresh >= shadowRefreshInterval) { renderer.shadowMap.needsUpdate = true; lastShadowRefresh = now; }
   update(dt, now); renderer.render(scene, camera); requestAnimationFrame(frame);
 }
 function resize() {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  renderer.setPixelRatio(activePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.fov = window.innerWidth < 650 ? 59 : 55;

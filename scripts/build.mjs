@@ -45,12 +45,18 @@ if (!/const MOUNTAIN_MINT_REQUIREMENT = 70;/.test(gameSource) ||
   throw new Error('Blue Ridge Mountain must generate 84 fresh mints while retaining its 70-mint summit goal.');
 }
 if (!/const MINT_CUSHION = 1\.2;/.test(gameSource) ||
+    !/const MEADOW_TRAMPOLINE_MINTS_PER_PAD = 11;/.test(gameSource) ||
+    !/const MEADOW_TRAMPOLINE_MINT_COUNT = 4 \* MEADOW_TRAMPOLINE_MINTS_PER_PAD;/.test(gameSource) ||
+    !/You gathered \$\{state\.pearls\} Fizz Mints! Your trampoline trail still sparkles behind you\./.test(gameSource) ||
+    !/const MEADOW_AVAILABLE_MINT_TOTAL = MEADOW_MINT_TOTAL \+ MEADOW_TRAMPOLINE_MINT_COUNT;/.test(gameSource) ||
     !/const MEADOW_MINT_TOTAL = Math\.ceil\(MEADOW_MINT_REQUIREMENT \* MINT_CUSHION\)/.test(gameSource) ||
     !/const WATER_MINT_TOTAL = Math\.ceil\(WATER_MINT_REQUIREMENT \* MINT_CUSHION\)/.test(gameSource)) {
   throw new Error('All stages must define a 1.2x collectible cushion.');
 }
 for (const runtimeGuard of [
   /pearls\.length !== MEADOW_MINT_TOTAL/,
+  /trampolineTrailPearls\.length!==MEADOW_TRAMPOLINE_MINT_COUNT/,
+  /pearls\.length!==MEADOW_AVAILABLE_MINT_TOTAL/,
   /waterMints\.length !== WATER_MINT_TOTAL/,
   /bridgePowerups\.length !== bridgePlatforms\.length \+ 1/,
 ]) {
@@ -116,10 +122,28 @@ for (const guard of gameplayGuards) {
   if (!guard.test(gameSource)) throw new Error(`Missing gameplay feature regression guard: ${guard}`);
 }
 if (!/const UNDERWATER_BUBBLE_COUNT = 4000;/.test(gameSource) ||
+    !/const UNDERWATER_DETAILED_BUBBLES = touchGpuProfile \? 300 : 760;/.test(gameSource) ||
+    !/farBubblePoints/.test(gameSource) ||
+    !/now - lastUnderwaterBubbleFieldUpdate < 40/.test(gameSource) ||
     !/function updateSeaTurtle\(dt,now\)/.test(gameSource) ||
     !/state\.ridingTurtle=true/.test(gameSource) ||
     !/state\.waterJumpsUsed < 3/.test(gameSource)) {
   throw new Error('Water World must retain 4,000 bubbles, triple jump, and the rideable mint-following turtle.');
+}
+if (!/const renderPixelRatioCap = touchGpuProfile \? 1\.28 : 1\.6;/.test(gameSource) ||
+    !/averageFrameMs \+= \(rawFrameMs - averageFrameMs\) \* 0\.08/.test(gameSource) ||
+    !/activePixelRatio - 0\.08/.test(gameSource) ||
+    !/const shadowRefreshInterval = touchGpuProfile \? 72 : 34;/.test(gameSource) ||
+    !/sun\.shadow\.mapSize\.set\(touchGpuProfile \? 1024 : 1536/.test(gameSource) ||
+    !/BUBBLE_LOD_SORT_INTERVAL = 240/.test(gameSource) ||
+    !/now - lastBubbleLodSort >= BUBBLE_LOD_SORT_INTERVAL/.test(gameSource) ||
+    !/averageFrameMs > 24/.test(gameSource) ||
+    !/underwaterDetailGroups/.test(gameSource) ||
+    !/const detailRange = touchGpuProfile \? 80 : 106;/.test(gameSource) ||
+    !/function updateMeadowDetailLOD\(now\)/.test(gameSource) ||
+    !/const detailRange = touchGpuProfile \? 102 : 138;/.test(gameSource) ||
+    !/const minimumAdaptivePixelRatio = Math\.min\(0\.90, activePixelRatio\)/.test(gameSource)) {
+  throw new Error('Mobile GPU savings must retain distance-based bubble LOD, a capped touch DPR, and lower-cadence 1024px soft shadows.');
 }
 if (!/const mountainJunctions = mountainTrailNodes\.map\(node=>\(\{node,half:7\.0,mesh:null\}\)\)/.test(gameSource) ||
     !/function findMountainSurfaceAt\(x,z\)/.test(gameSource) ||
@@ -201,11 +225,11 @@ const replayGuards = [
   [gameSource.includes("cloneSet(pearls, scene, 'meadow');") && gameSource.includes("cloneSet(waterMints, waterWorld, 'water');") && gameSource.includes("cloneSet(bridgeMints, bridgeWorld, 'bridge');") && gameSource.includes("cloneSet(mountainMints, mountainWorld, 'mountain');"), 'all stages double their mint pools'],
 ];
 for (const [ok, description] of replayGuards) if (!ok) throw new Error(`Missing progression regression guard: ${description}`);
-const replayAvailable = [Math.ceil(50*1.2)*2, Math.ceil(50*1.2)*2, Math.ceil(60*1.2)*2, Math.ceil(70*1.2)*2];
+const replayAvailable = [((Math.ceil(50*1.2) + 44) * 2), Math.ceil(50*1.2)*2, Math.ceil(60*1.2)*2, Math.ceil(70*1.2)*2];
 const replayRequired = [50*2, 50*2, 60*2, 70*2];
-if (replayAvailable.join('/') !== '120/120/144/168' || replayRequired.join('/') !== '100/100/120/140') throw new Error('Second-run mint availability and required goals must both double again.');
+if (replayAvailable.join('/') !== '208/120/144/168' || replayRequired.join('/') !== '100/100/120/140') throw new Error('Second-run mint availability and required goals must both double again.');
 const indexSource = await readFile(path.join(root, 'index.html'), 'utf8');
-if (!indexSource.includes('120 mints available · collect 100 · counter resets') || !indexSource.includes('144 mints available · collect 120 · counter resets') || !indexSource.includes('168 mints available · collect 140 · counter resets')) throw new Error('Replay selector must explain the doubled mint counts and goals.');
+if (!indexSource.includes('208 mints available · collect 100 · counter resets') || !indexSource.includes('120 mints available · collect 100 · counter resets') || !indexSource.includes('144 mints available · collect 120 · counter resets') || !indexSource.includes('168 mints available · collect 140 · counter resets')) throw new Error('Replay selector must explain the doubled mint counts and goals.');
 if (!/new Float32Array\(560 \* 3\)/.test(gameSource) || /(?<!new )Float32Array\(560 \* 3\)/.test(gameSource)) {
   throw new Error('Underwater particle position buffer must use the Float32Array constructor with new.');
 }
@@ -214,6 +238,22 @@ if (!indexSource.includes('id=\"fullscreen-toggle\"') || !indexSource.includes('
 }
 if (!indexSource.includes('id=\"stage-continue-button\"') || !gameSource.includes('waiting-for-stage-tap')) {
   throw new Error('New-world arrival must include a working, tappable continue button.');
+}
+
+if (!/width: clamp\(150px, 40vh, 174px\); height: clamp\(150px, 40vh, 174px\)/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8')) ||
+    !/width: clamp\(140px, 38vh, 166px\); height: clamp\(140px, 38vh, 166px\)/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8')) ||
+    !/inset: auto 36px max\(12px, env\(safe-area-inset-bottom\)\) 36px/.test(await readFile(path.join(root, 'src', 'style.css'), 'utf8'))) {
+  throw new Error('Landscape touch controls must be large and inset comfortably from both screen edges.');
+}
+if (!/desiredX=dx\/dist\*24\.0/.test(gameSource) ||
+    !/if\(seaTurtle\.target\?\.collected\) seaTurtle\.target=null/.test(gameSource) ||
+    !/seaTurtle\.group\.position\.set\(0,0,9\.5\)/.test(gameSource) ||
+    !/const shellPattern = new THREE\.CanvasTexture\(shellCanvas\)/.test(gameSource) ||
+    !/if\(state\.ridingTurtle && !state\.finale\.active\)/.test(gameSource)) {
+  throw new Error('Water turtle must spawn near the player, follow a locked target quickly, collect mint by shell contact, and use a textured shell.');
+}
+if (!/const seaMintSpots = \[\.\.\.baseSeaMintSpots, \.\.\.baseSeaMintSpots\.map/.test(gameSource) || !/parallel sweep makes the path vague and exploratory/.test(gameSource)) {
+  throw new Error('Water mint layout must remain a sparse, vague diagonal route.');
 }
 
 for (const relative of [
@@ -233,9 +273,9 @@ for (const relative of [
   const item = await stat(path.join(dist, relative));
   if (!item.isFile() || item.size === 0) throw new Error(`Missing or empty build output: ${relative}`);
 }
-console.log('Standard progression verified: Meadow 60 Fizz (goal 50), Water 60 Seafoam Mints (goal 50), Bridge 72 Bridge Mints (goal 60), Blue Ridge 84 Fresh Mints (goal 70).');
+console.log('Standard progression verified: Meadow 104 Fizz including 44 trampoline-arc bonuses (goal 50), Water 60 Seafoam Mints (goal 50), Bridge 72 Bridge Mints (goal 60), Blue Ridge 84 Fresh Mints (goal 70).');
 console.log(`Final bridge jump verified: ${deckEdgeGap.toFixed(2)}-unit deck-edge gap, ${climbHeight.toFixed(2)}-unit rise; Sora is on the launch deck.`);
 console.log(`Blue Ridge navigation verified across 5 lanes and 8 ramps; largest sampled support step ${maxLateralTrailStep.toFixed(3)} units.`);
 console.log(`Mountain trampolines are ground-level just off the start/middle/end trail sections (nearest distances ${padNearest.map(x=>x.toFixed(1)).join(', ')} units). Mountain walls use full visible-footprint collision; friend spawns search supported safe points.`);
-console.log('Second run verified: 120/120/144/168 mints available, with 100/100/120/140 required and collection counters reset.');
+console.log('Second run verified: 208/120/144/168 mints available, with 100/100/120/140 required and collection counters reset.');
 console.log('Build complete: dist/ contains the static GitHub Pages site.');

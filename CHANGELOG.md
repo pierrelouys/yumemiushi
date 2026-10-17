@@ -158,3 +158,23 @@
 - Added a completion screen after Blue Ridge that promises more worlds to come and offers a selector for any of the four stages. Replay mode doubles each stage's mint pool to 60/60/72/84 and resets every collected-mint counter to zero.
 - Fixed replay progression so entering the next world after replay reactivates that world's doubled mint pool instead of leaving its collectibles hidden.
 - Added build-time regression checks for soundtrack mapping/fallback, underwater triple jump, bubble effects, replay mint duplication/counter resets, the complete level selector, and all three Blue Ridge foothill trampolines.
+
+
+## Mobile controls, trampoline mint arcs, turtle ride, and performance
+
+- Increased landscape touch controls to large hit targets (roughly 126–152px joystick and 120–146px action button), inset 28px from the screen edges with safe-area padding, including short landscape screens.
+- Added 44 airborne Fizz Mints following ballistic parabolas from the four meadow trampolines. The meadow requirement remains 50 while standard availability rises to 104; replay has 208 available and still requires 100.
+- Arranged Seafoam Mints as two sparse, offset diagonal sweeps rather than row clusters.
+- Moved the giant turtle close to the Water World spawn, increased its ridden speed to 12 world units/sec, locked targets until collected, and collect Seafoam Mints when the turtle's shell/body reaches them.
+- Added a procedural scute pattern texture to the turtle shell.
+- Kept 4,000 bubbles while replacing most distant glass spheres with low-cost points. The nearest 760 use full shaded spheres; the bubble positions and touch/pop checks update 15–20 times/sec rather than every rendered frame.
+- Mobile GPU profile caps render DPR at 1.28, uses a 1024px soft shadow map, and refreshes the shadow map on a cadence that reduces GPU cost without simplifying the main plush character or fabric textures.
+
+
+## Landscape controls and mobile performance pass
+
+- Enlarged the landscape joystick to 150–174px, the jump/talk button to 140–166px, and increased side/bottom safe margins for more comfortable thumb control.
+- Kept all 4,000 Water World bubbles poppable, but use 300 detailed spheres on touch devices and 760 on desktop; the remaining bubbles are lightweight point LOD. Bubble LOD sorting now runs four times per second instead of every field update.
+- Added distance LOD for kelp/coral and meadow decoration, a soft water fog fade, less frequent background foliage animation, and adaptive phone render scale that backs off during sustained low frame rates and recovers when frame time improves.
+- Kept the meadow trampoline-arc bonus mints available without raising the 50-mint clear requirement; completion copy now celebrates the actual amount collected rather than claiming every mint was found.
+- Increased turtle taxi speed to 24 world units per second while preserving its locked target and contact-based mint collection.
