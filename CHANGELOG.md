@@ -207,3 +207,10 @@
 - Tightened scenery visibility so decorative ground props fade out around 30–34 units on touch devices (roughly 44–50 on desktop), friends around 30/42, and ambient creatures around 26/38. Water kelp/coral and non-target bubbles use their own near-detail ranges; bridge decks and mountain route surfaces retain longer safe ranges so upcoming traversal remains readable.
 - Added explicit build guards for distance culling, excluding target mints and the background floor from the cull lists, plus tap-to-continue level-clear results.
 - Moved the Water World turtle to (-5.5, 0, 2.3), approximately 11.2 units from the player start and aligned with the chase camera's actual forward sightline. The build now checks both physical separation and projected camera-forward distance, so the turtle must be visible ahead without overlapping or auto-boarding the player.
+
+
+## October 17, 2026 — Start-screen counts, mountain backdrop, and hidden magnet balance
+- Updated the welcome screen to report the live Meadow progression values: collect 50 Fizz Mints, with 104 available including the trampoline-arc bonus trail. The numbers are refreshed from the same constants used by gameplay.
+- Marked Blue Ridge skyline ridges and their snow caps as background mountain scenery, exempted them from distance-based stage clipping, and disabled frustum culling on these skyline elements so they remain in view as the player climbs. Nearby trail ramps, rocks, and props retain their separate clipping rules.
+- Moved each stage's hidden magnet into a peripheral nook away from its main mint trail or bridge decks, reduced its size and glow, and cut its attraction radius to 5.2 world units on land / 5.8 underwater (about one-third of the previous reach). Vertical reach and pull speed were reduced too.
+- Added build checks for the corrected welcome mint counts, uncullable background mountains, off-route magnet placement, and the reduced magnet range.

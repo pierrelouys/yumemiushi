@@ -27,6 +27,13 @@ const MEADOW_AVAILABLE_MINT_TOTAL = MEADOW_MINT_TOTAL + MEADOW_TRAMPOLINE_MINT_C
 const WATER_MINT_TOTAL = Math.ceil(WATER_MINT_REQUIREMENT * MINT_CUSHION);
 const BRIDGE_MINT_TOTAL = Math.ceil(BRIDGE_MINT_REQUIREMENT * MINT_CUSHION);
 const MOUNTAIN_MINT_TOTAL = Math.ceil(MOUNTAIN_MINT_REQUIREMENT * MINT_CUSHION);
+function updateWelcomeMintGoal() {
+  const requiredNode = $('#welcome-mint-required');
+  const availableNode = $('#welcome-mint-available');
+  if (requiredNode) requiredNode.textContent = String(MEADOW_MINT_REQUIREMENT);
+  if (availableNode) availableNode.textContent = String(MEADOW_AVAILABLE_MINT_TOTAL);
+}
+updateWelcomeMintGoal();
 scene.background = new THREE.Color('#d5f8f1');
 scene.fog = new THREE.Fog('#d5f8f1', 82, 178);
 
@@ -1848,11 +1855,14 @@ const ridgePeaks = [
 ];
 for (const [x,z,r,h] of ridgePeaks) {
   const ridge = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 2), mountainRockMat);
-  ridge.position.set(x, h * 0.48 - 1.1, z); ridge.rotation.y = rand() * Math.PI; ridge.scale.set(1.22,1,0.76); ridge.castShadow = true; ridge.receiveShadow = true; mountainWorld.add(ridge); registerStageObjectCull(ridge, 'mountain', 60, 78);
+  ridge.position.set(x, h * 0.48 - 1.1, z); ridge.rotation.y = rand() * Math.PI; ridge.scale.set(1.22,1,0.76); ridge.castShadow = true; ridge.receiveShadow = true;
+  // The skyline ridges are background scenery, not local set dressing: never distance-clip them.
+  ridge.userData.backgroundMountain = true; ridge.frustumCulled = false; mountainWorld.add(ridge);
   mountainSolidColliders.push({ kind:'ellipse', x, z, rx:r*1.22, rz:r*0.76, topY:h-0.8 });
   if (h > 58) {
     const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.40, h * 0.23, 7, 1), mountainSnowMat);
-    cap.position.set(x * 0.99, h * 0.80, z); cap.rotation.y = ridge.rotation.y; cap.scale.set(1.16,1,0.77); mountainWorld.add(cap); registerStageObjectCull(cap, 'mountain', 60, 78);
+    cap.position.set(x * 0.99, h * 0.80, z); cap.rotation.y = ridge.rotation.y; cap.scale.set(1.16,1,0.77);
+    cap.userData.backgroundMountain = true; cap.frustumCulled = false; mountainWorld.add(cap);
   }
 }
 // Trail is a sequence of connected, broad inclined ledges on a switchback route. Each edge meets
@@ -2388,17 +2398,17 @@ addMountainTrampoline(9.00, -83.66, '#86c7ed');
 // A hidden-for-exploration magnet pickup exists in every world. The pickup is deliberately
 // kept off the minimap so players discover it naturally; once found, it attracts that world's
 // mints for the remainder of the stage.
-const magnetFrameMaterial = new THREE.MeshStandardMaterial({ color:'#d9f7ff', roughness:0.28, metalness:0.48, emissive:'#5fd8ef', emissiveIntensity:0.22 });
+const magnetFrameMaterial = new THREE.MeshStandardMaterial({ color:'#b8d2d2', roughness:0.46, metalness:0.28, emissive:'#438c96', emissiveIntensity:0.07 });
 const magnetNorthMaterial = new THREE.MeshStandardMaterial({ color:'#ff5a59', roughness:0.36, metalness:0.18, emissive:'#8f202e', emissiveIntensity:0.18 });
 const magnetSouthMaterial = new THREE.MeshStandardMaterial({ color:'#4186ff', roughness:0.32, metalness:0.22, emissive:'#1747a8', emissiveIntensity:0.2 });
-const magnetAuraMaterial = new THREE.MeshBasicMaterial({ color:'#a9f7ff', transparent:true, opacity:0.48, depthWrite:false, toneMapped:false });
+const magnetAuraMaterial = new THREE.MeshBasicMaterial({ color:'#a9f7ff', transparent:true, opacity:0.16, depthWrite:false, toneMapped:false });
 const magnetTubeGeometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
   new THREE.Vector3(-0.42,0.42,0), new THREE.Vector3(-0.43,0.12,0), new THREE.Vector3(-0.36,-0.18,0),
   new THREE.Vector3(-0.20,-0.34,0), new THREE.Vector3(0,-0.39,0), new THREE.Vector3(0.20,-0.34,0),
   new THREE.Vector3(0.36,-0.18,0), new THREE.Vector3(0.43,0.12,0), new THREE.Vector3(0.42,0.42,0),
 ]), 32, 0.125, 10, false);
 function createStageMagnet(stage, parent, x, baseY, z) {
-  const group = new THREE.Group(); group.name = `${stage}-hidden-mint-magnet`;
+  const group = new THREE.Group(); group.name = `${stage}-hidden-mint-magnet`; group.scale.setScalar(0.82);
   const frame = new THREE.Mesh(magnetTubeGeometry, magnetFrameMaterial); frame.castShadow = true; group.add(frame);
   const north = new THREE.Mesh(new RoundedBoxGeometry(0.30,0.23,0.28,4,0.05),magnetNorthMaterial);
   north.position.set(-0.42,0.43,0); north.castShadow = true; group.add(north);
@@ -2408,17 +2418,17 @@ function createStageMagnet(stage, parent, x, baseY, z) {
   const sMark = nMark.clone(); sMark.position.x=0.42; group.add(sMark);
   const aura = new THREE.Mesh(new THREE.TorusGeometry(0.87,0.035,8,36),magnetAuraMaterial); aura.rotation.x=-Math.PI/2; aura.position.y=-0.34; group.add(aura);
   const sparkMaterial = new THREE.MeshBasicMaterial({color:'#fff9cf',toneMapped:false});
-  for (let i=0;i<4;i++) { const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.075,0),sparkMaterial); star.position.set(Math.cos(i*Math.PI/2)*0.78,0.12+Math.sin(i*2.2)*0.13,Math.sin(i*Math.PI/2)*0.5); group.add(star); }
+  for (let i=0;i<4;i++) { const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.048,0),sparkMaterial); star.position.set(Math.cos(i*Math.PI/2)*0.78,0.12+Math.sin(i*2.2)*0.13,Math.sin(i*Math.PI/2)*0.5); group.add(star); }
   group.position.set(x,baseY+1.0,z); group.visible=stage==='meadow'; parent.add(group);
   return { stage, group, aura, x, z, baseY, phase:rand()*Math.PI*2, collected:false };
 }
-const bridgeMagnetPoint = localBridgePoint(bridgePlatforms[5], -5.5, 0);
-const mountainMagnetPoint = mountainPointOnSegment(mountainTrailSegments[3], 0.68, 4.4);
+// Pickups are tucked into peripheral nooks away from the main collectible routes.
+// They remain reachable from the ground/forest edge, but are not sitting on a mint trail or deck.
 const stageMagnetPickups = [
-  createStageMagnet('meadow',scene,-61,0,2),
-  createStageMagnet('water',waterWorld,38,0,-23),
-  createStageMagnet('bridge',bridgeWorld,bridgeMagnetPoint.x,bridgePlatforms[5].y,bridgeMagnetPoint.z),
-  createStageMagnet('mountain',mountainWorld,mountainMagnetPoint.x,mountainMagnetPoint.y,mountainMagnetPoint.z),
+  createStageMagnet('meadow',scene,86,0,-82),
+  createStageMagnet('water',waterWorld,85,0,-81),
+  createStageMagnet('bridge',bridgeWorld,73,0,-70),
+  createStageMagnet('mountain',mountainWorld,57,0.16,33),
 ];
 function activeTrampolineSet() { return worldMode === 'mountain' ? mountainTrampolines : (worldMode === 'meadow' ? trampolines : []); }
 function findTrampolineAt(x, z) {
@@ -2472,7 +2482,7 @@ function updateStageMagnetVisuals(now) {
     pickup.group.position.y = pickup.baseY + 1.0 + Math.sin(now * 0.0022 + pickup.phase) * 0.14;
     pickup.group.rotation.y = Math.sin(now * 0.0007 + pickup.phase) * 0.23;
     pickup.aura.rotation.z = now * 0.0007 + pickup.phase;
-    pickup.aura.scale.setScalar(1 + Math.sin(now * 0.0031 + pickup.phase) * 0.08);
+    pickup.aura.scale.setScalar(1 + Math.sin(now * 0.0031 + pickup.phase) * 0.035);
   }
 }
 function tryCollectStageMagnet(now) {
@@ -2498,9 +2508,10 @@ function attractMintTowardPlayer(mint, dt) {
   const dx = state.x - position.x, dz = state.z - position.z;
   const dy = Math.abs((state.y + 1.0) - position.y);
   const horizontal = Math.hypot(dx,dz);
-  const radius = worldMode === 'water' ? 17.5 : 15.5;
-  if (horizontal > radius || dy > 10.5 || horizontal < 0.001) return;
-  const speed = horizontal > 5.5 ? 8.5 : 12.5;
+  // Magnet is a helpful nudge, not a vacuum: only nearby mints should drift to the player.
+  const radius = worldMode === 'water' ? 5.8 : 5.2;
+  if (horizontal > radius || dy > 4.2 || horizontal < 0.001) return;
+  const speed = horizontal > 2.6 ? 5.0 : 7.2;
   const step = Math.min(horizontal, speed * Math.min(dt,0.05));
   position.x += dx / horizontal * step;
   position.z += dz / horizontal * step;

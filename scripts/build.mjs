@@ -160,9 +160,17 @@ const magnetPullCalls = [...gameSource.matchAll(/^\s+attractMintTowardPlayer\((?
 if (magnetStages.join(',') !== 'bridge,meadow,mountain,water' || magnetPullCalls !== 4) {
   throw new Error(`Exactly one hidden magnet and a mint-attraction update are required in each stage; found stages ${magnetStages.join(', ') || 'none'} and ${magnetPullCalls} attraction calls.`);
 }
+const magnetPlacementBlock = gameSource.match(/const stageMagnetPickups = \[([\s\S]*?)\];/);
 const meadowMagnet = gameSource.match(/createStageMagnet\('meadow',scene,([-\d.]+),0,([-\d.]+)\)/);
-if (!meadowMagnet || Math.hypot(Number(meadowMagnet[1]),Number(meadowMagnet[2])-12) < 18) {
-  throw new Error('Meadow magnet must be tucked away from the starting area, not collected immediately at spawn.');
+if (!meadowMagnet || Math.hypot(Number(meadowMagnet[1]),Number(meadowMagnet[2])-12) < 90 ||
+    !magnetPlacementBlock ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('water',waterWorld,85,0,-81)") ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('bridge',bridgeWorld,73,0,-70)") ||
+    !magnetPlacementBlock[1].includes("createStageMagnet('mountain',mountainWorld,57,0.16,33)") ||
+    !/const radius = worldMode === 'water' \? 5\.8 : 5\.2;/.test(gameSource) ||
+    !/if \(horizontal > radius \|\| dy > 4\.2 \|\| horizontal < 0\.001\) return;/.test(gameSource) ||
+    !/opacity:0\.16,\s*depthWrite:false/.test(gameSource)) {
+  throw new Error('Stage magnets must be tucked off the primary routes and attract only nearby mints within the reduced radius.');
 }
 if (!/const UNDERWATER_BUBBLE_COUNT = 4000;/.test(gameSource) ||
     !/const UNDERWATER_DETAILED_BUBBLES = touchGpuProfile \? 300 : 760;/.test(gameSource) ||
@@ -283,7 +291,10 @@ if (!/function splitInstancedMeshByDistance\(/.test(gameSource) ||
     !/const updateRange = touchGpuProfile \? 26 : 38/.test(gameSource) ||
     !/registerStageObjectCull\(group, 'bridge', 52, 70\)/.test(gameSource) ||
     !/registerStageObjectCull\(ramp, 'mountain', 54, 72\)/.test(gameSource) ||
-    !/registerStageObjectCull\(ridge, 'mountain', 60, 78\)/.test(gameSource) ||
+    /registerStageObjectCull\(ridge, 'mountain'/.test(gameSource) ||
+    /registerStageObjectCull\(cap, 'mountain'/.test(gameSource) ||
+    !/ridge\.userData\.backgroundMountain = true; ridge\.frustumCulled = false/.test(gameSource) ||
+    !/cap\.userData\.backgroundMountain = true; cap\.frustumCulled = false/.test(gameSource) ||
     !/registerStageObjectCull\(rock, 'mountain', 36, 50\)/.test(gameSource) ||
     !/registerStageObjectCull\(trunk, 'bridge', 36, 52\)/.test(gameSource)) {
   throw new Error('Distant non-target scenery must be spatially clipped while floors and mint collectibles remain available.');
@@ -302,6 +313,7 @@ if (!/clearAwaitingTap: false, pendingClearTarget: null/.test(gameSource) ||
 }
 
 const indexSource = await readFile(path.join(root, 'index.html'), 'utf8');
+if (!indexSource.includes('id="welcome-mint-required">50</span>') || !indexSource.includes('id="welcome-mint-available">104</b>') || !/function updateWelcomeMintGoal\(\)/.test(gameSource) || !/updateWelcomeMintGoal\(\);/.test(gameSource)) throw new Error('Start screen must show the current meadow mint goal and available count.');
 if (!indexSource.includes('208 mints available · collect 100 · counter resets') || !indexSource.includes('120 mints available · collect 100 · counter resets') || !indexSource.includes('144 mints available · collect 120 · counter resets') || !indexSource.includes('168 mints available · collect 140 · counter resets')) throw new Error('Replay selector must explain the doubled mint counts and goals.');
 if (!/new Float32Array\(560 \* 3\)/.test(gameSource) || /(?<!new )Float32Array\(560 \* 3\)/.test(gameSource)) {
   throw new Error('Underwater particle position buffer must use the Float32Array constructor with new.');
